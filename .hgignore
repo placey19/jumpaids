@@ -1,0 +1,4 @@
+syntax: glob
+
+*.lnk
+update.bat
