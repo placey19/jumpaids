@@ -16,14 +16,35 @@ new const gszDotSprite[] = "sprites/dot.spr";
 new const gszDigits[] = "sprites/jumpaids/digits.spr";	
 
 new const Float:gfDigitOffsetMultipliers[3] = { 0.8, 0.0, 0.8 };
-new const Float:vColor0[3] = { 0.0, 0.0, 0.0 };
-new const Float:vColorLj[3] = { 0.0, 255.0, 0.0 };
-new const Float:vColorHj[3] = { 200.0, 100.0, 0.0 };
+new const Float:gvColor0[3] = { 0.0, 0.0, 0.0 };
+new const Float:gvColorLj[3] = { 0.0, 255.0, 0.0 };
+new const Float:gvColorHj[3] = { 200.0, 100.0, 0.0 };
 
-new Float:vTemp[3];
-new gMaxPlayers;
+new giMaxPlayers;
 new gDistanceBeam[33];
 new gDistanceDigits[33][3];
+
+//reusable expressions for all players
+new giTrace = 0;
+new giDistance;
+new Float:gfDistance;
+new Float:gfFraction;
+new Float:gfOffsetUnitX;
+new Float:gfOffsetUnitY;
+new Float:gfOffsetX;
+new Float:gfOffsetY;
+new Float:gvOrigin[3];
+new Float:gvAbsMin[3];
+new Float:gvAbsMax[3];
+new Float:gvAngles[3];
+new Float:gvTraceStart[3];
+new Float:gvTraceEnd[3];
+new Float:gvTraceHit[3];
+new Float:gvPlayerEdge[3];
+new Float:gvNormal[3];
+
+//how far forward the initial trace will start from
+new const Float:gForwardDist = 100.0;
 
 public plugin_precache() {
 	precache_model(gszDotSprite);
@@ -35,9 +56,9 @@ public plugin_init() {
 }
 
 public plugin_cfg() {
-	gMaxPlayers = get_maxplayers();
+	giMaxPlayers = get_maxplayers();
 
-	for (new id = 1; id <= gMaxPlayers; id++) {
+	for (new id = 1; id <= giMaxPlayers; id++) {
 		gDistanceBeam[id] = Beam_Create(gszDotSprite, 2.0);
 		
 		//create 3 new entities to use for the distance digits
@@ -48,7 +69,7 @@ public plugin_cfg() {
 				entity_set_model(ent, gszDigits);
 				entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);
 				entity_set_float(ent, EV_FL_renderamt, 0.0);
-				entity_set_vector(ent, EV_VEC_rendercolor, vColor0);
+				entity_set_vector(ent, EV_VEC_rendercolor, gvColor0);
 				entity_set_float(ent, EV_FL_scale, 0.5);
 			}
 			gDistanceDigits[id][i] = ent;
@@ -60,7 +81,7 @@ public client_PreThink(id) {
 	traceAndShowJumpDistance(id);
 }
 
-public set_distance_digits(const digits[3], const distance, const Float:vOrigin[3], const Float:vNormal[3]) {
+public set_distance_digits(const digits[3], const distance, const Float:vOrigin[3], Float:vNormal[3]) {
 	new const Float:fDigitGapSize = 10.0;
 	new Float:vPos[3];
 	
@@ -68,11 +89,14 @@ public set_distance_digits(const digits[3], const distance, const Float:vOrigin[
 	new szDistance[4];
 	format(szDistance, 3, "%d", distance);
 	
-	//get the angles the digits will be at based off the given normal
+	console_print(0, "vNormal: %f, %f, %f (%f)", vNormal[0], vNormal[1], vNormal[2], xs_vec_len(vNormal));
+	
+	//get the angles the digits will be at, based off the given normal
 	new Float:vAngles[3];
 	vector_to_angle(vNormal, vAngles);
 	
-	for (new i = 0; i < 3; ++i) {
+	new numDigits = strlen(szDistance);
+	for (new i = 0; i < numDigits; ++i) {
 		if (is_valid_ent(digits[i])) {
 			entity_set_float(digits[i], EV_FL_frame, float(szDistance[i] - 48));
 			
@@ -100,101 +124,103 @@ public setvec(Float:vec[3], Float:x, Float:y, Float:z) {
 	vec[2] = z;
 }
 
+/**
+ * Get the edge of the block that the player is standing on.
+ */
+//getEdgeOfPlayerBlock() {
+//}
+
+/**
+ * Main method to call to trace jump and show beam and jump distance.
+ */
 public traceAndShowJumpDistance(id) {
 	new flags = entity_get_int(id, EV_INT_flags);
-	new bool:updatedBeam = false;
+	new bool:updateBeam = false;
 	new Float:color[3];
 
 	//if player is alive and has feet on the ground
 	if (is_user_alive(id) && flags & FL_ONGROUND) {
 		//get player vectors of interest
-		new Float:pOrigin[3];
-		new Float:pAbsMin[3];
-		new Float:pAbsMax[3];
-		new Float:pAngles[3];
-		entity_get_vector(id, EV_VEC_origin, pOrigin);
-		entity_get_vector(id, EV_VEC_absmin, pAbsMin);
-		entity_get_vector(id, EV_VEC_absmax, pAbsMax);
-		entity_get_vector(id, EV_VEC_angles, pAngles);
+		entity_get_vector(id, EV_VEC_origin, gvOrigin);
+		entity_get_vector(id, EV_VEC_absmin, gvAbsMin);
+		entity_get_vector(id, EV_VEC_absmax, gvAbsMax);
+		entity_get_vector(id, EV_VEC_angles, gvAngles);
+		gvAbsMin[2] += 0.9;	//needs doing, dunno why...
 		
 		//calculate forward position
-		new Float:offsetUnitX = floatcos(pAngles[1], degrees);
-		new Float:offsetUnitY = floatsin(pAngles[1], degrees);
-		new Float:forwardDist = 100.0;
-		new Float:offsetX = offsetUnitX * forwardDist;
-		new Float:offsetY = offsetUnitY * forwardDist;
+		gfOffsetUnitX = floatcos(gvAngles[1], degrees);
+		gfOffsetUnitY = floatsin(gvAngles[1], degrees);
+		gfOffsetX = gfOffsetUnitX * gForwardDist;
+		gfOffsetY = gfOffsetUnitY * gForwardDist;
 		
 		//setup the trace start and end vectors
-		new Float:vTraceStart[3];
-		new Float:vTraceEnd[3];
-		setvec(vTraceStart, pOrigin[0] + offsetX, pOrigin[1] + offsetY, pAbsMax[2]);
-		setvec(vTraceEnd, pOrigin[0] + offsetX, pOrigin[1] + offsetY, pAbsMin[2] - 100.0);
+		setvec(gvTraceStart, gvOrigin[0] + gfOffsetX, gvOrigin[1] + gfOffsetY, gvAbsMax[2]);
+		setvec(gvTraceEnd, gvOrigin[0] + gfOffsetX, gvOrigin[1] + gfOffsetY, gvAbsMin[2] - 100.0);
 		
 		//do the trace
-		new trace = 0;
-		engfunc(EngFunc_TraceLine, vTraceStart, vTraceEnd, IGNORE_MONSTERS, id, trace);
+		engfunc(EngFunc_TraceLine, gvTraceStart, gvTraceEnd, IGNORE_MONSTERS, id, giTrace);
 		  
 		//get the trace hit vector
-		new Float:vTraceHit[3];
-		get_tr2(trace, TR_vecEndPos, vTraceHit);
+		get_tr2(giTrace, TR_vecEndPos, gvTraceHit);
 		
-		//get difference between trace hit point and players feet. Dunno why the +1
-		new Float:heightDelta = (pAbsMin[2] - vTraceHit[2] + 1.0);
+		//get difference between trace hit point and players feet
+		new Float:heightDelta = (gvAbsMin[2] - gvTraceHit[2]);
 		if (heightDelta > 2.0) {
 			//trace backwards towards player to hit what they're standing on
-			offsetX = offsetUnitX * -(forwardDist + 10.0);
-			offsetY = offsetUnitY * -(forwardDist + 10.0);
-			vTemp[2] = pAbsMin[2];
-			setvec(vTraceStart, vTraceHit[0], vTraceHit[1], vTemp[2]);
-			setvec(vTraceEnd, vTraceHit[0] + offsetX, vTraceHit[1] + offsetY, vTemp[2]);
-			engfunc(EngFunc_TraceLine, vTraceStart, vTraceEnd, IGNORE_MONSTERS, id, trace);
+			gfOffsetX = gfOffsetUnitX * -(gForwardDist + 10.0);
+			gfOffsetY = gfOffsetUnitY * -(gForwardDist + 10.0);
+			setvec(gvTraceStart, gvTraceHit[0], gvTraceHit[1], gvAbsMin[2]);
+			setvec(gvTraceEnd, gvTraceHit[0] + gfOffsetX, gvTraceHit[1] + gfOffsetY, gvAbsMin[2]);
+			engfunc(EngFunc_TraceLine, gvTraceStart, gvTraceEnd, IGNORE_MONSTERS, id, giTrace);
 			
-			new Float:fraction;
-			get_tr2(trace, TR_flFraction, fraction);
-			if (fraction != 1.0) {
-				new Float:vPlayerEdge[3];
-				new Float:vNormal[3];
-				get_tr2(trace, TR_vecEndPos, vPlayerEdge);
-				get_tr2(trace, TR_vecPlaneNormal, vNormal);
+			get_tr2(giTrace, TR_flFraction, gfFraction);
+			if (gfFraction != 1.0) {
+				get_tr2(giTrace, TR_vecEndPos, gvPlayerEdge);
+				get_tr2(giTrace, TR_vecPlaneNormal, gvNormal);
+				
+				//ensure the normal is perpendicular to the ground
+				if (gvNormal[2] != 0.0) {
+					gvNormal[2] = 0.0;
+					xs_vec_normalize(gvNormal, gvNormal);
+				}
 				
 				//trace forwards 
-				offsetX = (vNormal[0] * 300.0);
-				offsetY = (vNormal[1] * 300.0); 
-				setvec(vTraceStart, vPlayerEdge[0], vPlayerEdge[1], vPlayerEdge[2]);
-				setvec(vTraceEnd, vPlayerEdge[0] + offsetX, vPlayerEdge[1] + offsetY, vPlayerEdge[2]);
-				engfunc(EngFunc_TraceLine, vTraceStart, vTraceEnd, IGNORE_MONSTERS, id, trace);
+				gfOffsetX = (gvNormal[0] * 300.0);
+				gfOffsetY = (gvNormal[1] * 300.0); 
+				setvec(gvTraceStart, gvPlayerEdge[0], gvPlayerEdge[1], gvPlayerEdge[2]);
+				setvec(gvTraceEnd, gvPlayerEdge[0] + gfOffsetX, gvPlayerEdge[1] + gfOffsetY, gvPlayerEdge[2]);
+				engfunc(EngFunc_TraceLine, gvTraceStart, gvTraceEnd, IGNORE_MONSTERS, id, giTrace);
 				
-				get_tr2(trace, TR_flFraction, fraction);
-				if (fraction != 1.0) {
-					get_tr2(trace, TR_vecEndPos, vTraceHit);
-					new Float:fDistance = get_distance_f(vPlayerEdge, vTraceHit);
-					new iDistance = floatround(fDistance, floatround_round);
+				get_tr2(giTrace, TR_flFraction, gfFraction);
+				if (gfFraction != 1.0) {
+					get_tr2(giTrace, TR_vecEndPos, gvTraceHit);
+					gfDistance = get_distance_f(gvPlayerEdge, gvTraceHit);
+					giDistance = floatround(gfDistance, floatround_round);
 					
-					if (iDistance >= 150) {
+					if (giDistance >= 150) {
 						//update the beam
-						Beam_PointsInit(gDistanceBeam[id], vPlayerEdge, vTraceHit);
+						Beam_PointsInit(gDistanceBeam[id], gvPlayerEdge, gvTraceHit);
 						
 						//update digits
-						offsetX = (vNormal[0] * (fDistance / 2.0));
-						offsetY = (vNormal[1] * (fDistance / 2.0));
-						setvec(vTemp, vPlayerEdge[0] + offsetX, vPlayerEdge[1] + offsetY, vPlayerEdge[2]);
-						set_distance_digits(gDistanceDigits[id], iDistance, vTemp, vNormal);
+						gfOffsetX = (gvNormal[0] * (gfDistance / 2.0));
+						gfOffsetY = (gvNormal[1] * (gfDistance / 2.0));
+						new Float:vTemp[3]; 
+						setvec(vTemp, gvPlayerEdge[0] + gfOffsetX, gvPlayerEdge[1] + gfOffsetY, gvPlayerEdge[2]);
+						set_distance_digits(gDistanceDigits[id], giDistance, vTemp, gvNormal);
 						
 						//trace downwards to get height - whether its a LJ or HJ
-						setvec(vTraceStart, vPlayerEdge[0], vPlayerEdge[1], vPlayerEdge[2]);
-						setvec(vTraceEnd, vPlayerEdge[0], vPlayerEdge[1], vPlayerEdge[2] + 1 - 80);
-						engfunc(EngFunc_TraceLine, vTraceStart, vTraceEnd, IGNORE_MONSTERS, id, trace);
-						get_tr2(trace, TR_vecEndPos, vTraceHit);
-						fDistance = get_distance_f(vPlayerEdge, vTraceHit);
-						if (fDistance < 70.0) {
-							color = vColorLj;
+						setvec(gvTraceStart, gvPlayerEdge[0], gvPlayerEdge[1], gvPlayerEdge[2]);
+						setvec(gvTraceEnd, gvPlayerEdge[0], gvPlayerEdge[1], gvPlayerEdge[2] + 1 - 80);
+						engfunc(EngFunc_TraceLine, gvTraceStart, gvTraceEnd, IGNORE_MONSTERS, id, giTrace);
+						get_tr2(giTrace, TR_vecEndPos, gvTraceHit);
+						gfDistance = get_distance_f(gvPlayerEdge, gvTraceHit);
+						if (gfDistance < 70.0) {
+							color = gvColorLj;
 						} else {
-							color = vColorHj;
+							color = gvColorHj;
 						}
-						updatedBeam = true;
 						
-						//temp stuff
-						console_print(id, "distance: %f", fDistance);
+						updateBeam = true;
 					}
 				}
 			}
@@ -202,14 +228,14 @@ public traceAndShowJumpDistance(id) {
 	}
 
 	//set the beam and digits visibility
-	if (updatedBeam) {
+	if (updateBeam) {
 		Beam_SetColor(gDistanceBeam[id], color);
 		for (new i = 0; i < 3; ++i) {
 			entity_set_float(gDistanceDigits[id][i], EV_FL_renderamt, 255.0);
 			entity_set_vector(gDistanceDigits[id][i], EV_VEC_rendercolor, color);
 		}
 	} else {
-		Beam_SetColor(gDistanceBeam[id], vColor0);
+		Beam_SetColor(gDistanceBeam[id], gvColor0);
 		for (new i = 0; i < 3; ++i) {
 			entity_set_float(gDistanceDigits[id][i], EV_FL_renderamt, 0.0);
 		}
