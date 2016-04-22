@@ -10,15 +10,15 @@
 
 #pragma semicolon 1;
 
+//constants
 new const gszJumpAidsPrefix[] = "jumpaids";
+new const gszJumpAidsMainMenu[] = "jumpaids_mainmenu";
 new const gszInfoTarget[] = "info_target";
 new const gszDigitClassname[] = "jumpaids_digit";
 new const gszDistanceBeamClassname[] = "jumpaids_distancebeam";
 new const gszJumpEdgeBeamClassname[] = "jumpaids_jumpedgebeam";
 new const gszDotSprite[] = "sprites/jumpaids/dot.spr";
 new const gszDigits[] = "sprites/jumpaids/digits.spr";
-
-//constants
 new const Float:gfDigitOffsetMultipliers[3] = { 0.8, 0.0, 0.8 };
 new const Float:gColor0[3] = { 0.0, 0.0, 0.0 };
 new const Float:gColorLj[3] = { 0.0, 255.0, 0.0 };
@@ -30,10 +30,27 @@ new const Float:gJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
 new const Float:gJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
 new const Float:gDistanceBeamWidth = 2.0;	//width of the distance beam
 
-new giMaxPlayers;
+//enum for menu option values
+enum
+{
+	N1, N2, N3, N4, N5, N6, N7, N8, N9, N0
+};
+
+//enum for bit-shifted numbers 1 - 10 for main menu
+enum
+{
+	B1 = 1 << N1, B2 = 1 << N2, B3 = 1 << N3, B4 = 1 << N4, B5 = 1 << N5,
+	B6 = 1 << N6, B7 = 1 << N7, B8 = 1 << N8, B9 = 1 << N9, B0 = 1 << N0,
+};
+
+//global variables
 new gDistanceBeam[33];
 new gJumpEdgeBeam[33];
 new gDistanceDigits[33][3];
+new gszMainMenu[256];
+new gKeysMainMenu;
+new bool:gDistanceBeamOn[33];
+new bool:gJumpEdgeBeamOn[33];
 
 //reusable expressions for all players
 new Float:gvPlayerOrigin[3];
@@ -48,55 +65,75 @@ public plugin_precache() {
 }
 
 public plugin_init() {
+	//register plugin are server variable so servers running this plugin can be searched for
 	register_plugin(PLUGIN, VERSION, AUTHOR);
+	register_cvar(PLUGIN, VERSION, FCVAR_SERVER, 0.0);
+	
+	//register forwards
 	register_forward(FM_AddToFullPack, "addToFullPack");
-}
-
-public plugin_cfg() {
-	giMaxPlayers = get_maxplayers();
-
-	for (new id = 1; id <= giMaxPlayers; id++) {
-		//create distance beam entity
-		new ent = Beam_Create(gszDotSprite, gDistanceBeamWidth);
-		entity_set_string(gDistanceBeam[id], EV_SZ_classname, gszDistanceBeamClassname);
-		entity_set_int(gDistanceBeam[id], EV_INT_groupinfo, id);
-		gDistanceBeam[id] = ent;
-		
-		//create jump edge beam entity
-		ent = Beam_Create(gszDotSprite, gJumpEdgeBeamWidth);
-		entity_set_string(gJumpEdgeBeam[id], EV_SZ_classname, gszJumpEdgeBeamClassname);
-		entity_set_int(gJumpEdgeBeam[id], EV_INT_groupinfo, id);
-		gJumpEdgeBeam[id] = ent;
-		
-		//create 3 new entities to use for the distance digits
-		for (new i = 0; i < 3; ++i) {
-			ent = create_entity(gszInfoTarget);
-			entity_set_string(ent, EV_SZ_classname, gszDigitClassname);
-			entity_set_model(ent, gszDigits);
-			entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);
-			entity_set_float(ent, EV_FL_renderamt, 0.0);
-			entity_set_vector(ent, EV_VEC_rendercolor, gColor0);
-			entity_set_float(ent, EV_FL_scale, 0.5);
-			entity_set_int(ent, EV_INT_groupinfo, id);
-			gDistanceDigits[id][i] = ent;
-		}
-	}
+	
+	//register client commands
+	register_clcmd("say /jumpaids", "showMainMenu");
+	register_clcmd("sayteam /jumpaids", "showMainMenu");
+	
+	//create main menu
+	new size = sizeof(gszMainMenu);
+	add(gszMainMenu, size, "\yJump Aids Main Menu^n^n");
+	add(gszMainMenu, size, "\r1. \wDistance: %s^n");
+	add(gszMainMenu, size, "\r2. \wEdge: %s^n^n");
+	add(gszMainMenu, size, "\r0. \wClose");
+	gKeysMainMenu = B1 | B2 | B0;
+	register_menucmd(register_menuid(gszJumpAidsMainMenu), gKeysMainMenu, "handleMainMenu");
 }
 
 public client_PreThink(id) {
-	showJumpAids(id);
+	handleJumpAids(id);
 }
 
 public addToFullPack(ent_state, ent, edict_t_ent, id, hostflags, player, pSet) {
 	if (is_user_connected(id) && isJumpAidsEntity(ent)) {
 		new entOwner = entity_get_int(ent, EV_INT_groupinfo);
 		if (id != entOwner) {
+			//ensure players can't see other players jump aids
 			entity_set_float(ent, EV_FL_renderamt, 0.0);
 			return 0;
 		}
 	}
 	
 	return 1;
+}
+
+public client_disconnect(id) {
+	deleteDistanceBeamForPlayer(id);
+	deleteJumpEdgeBeamForPlayer(id);
+	gDistanceBeamOn[id] = false;
+	gJumpEdgeBeamOn[id] = false;
+}
+
+public showMainMenu(id) {
+	//format the main menu
+	static szMenu[256];
+	static szDistanceState[6];
+	static szJumpEdgeState[6];
+	szDistanceState = (gDistanceBeamOn[id] ? "\yOn" : "\rOff");
+	szJumpEdgeState = (gJumpEdgeBeamOn[id] ? "\yOn" : "\rOff");
+	format(szMenu, 256, gszMainMenu, szDistanceState, szJumpEdgeState);
+	
+	//show the main menu to the player
+	show_menu(id, gKeysMainMenu, szMenu, -1, gszJumpAidsMainMenu);
+	
+	return PLUGIN_HANDLED;
+}
+
+public handleMainMenu(id, num) {
+	switch (num) {
+		case N1: { toggleDistanceBeamForPlayer(id); }
+		case N2: { toggleJumpEdgeBeamForPlayer(id); }
+		case N0: { return; }
+	}
+	
+	//display menu again
+	showMainMenu(id);
 }
 
 /**
@@ -117,19 +154,105 @@ bool:isJumpAidsEntity(ent) {
 }
 
 /**
+ * Toggle the distance beam on and off for the given player.
+ */
+toggleDistanceBeamForPlayer(id) {
+	gDistanceBeamOn[id] = !gDistanceBeamOn[id];
+	if (gDistanceBeamOn[id]) {
+		createDistanceBeamForPlayer(id);
+	} else {
+		deleteDistanceBeamForPlayer(id);
+	}
+}
+
+/**
+ * Toggle the jump edge beam on and off for the given player.
+ */
+toggleJumpEdgeBeamForPlayer(id) {
+	gJumpEdgeBeamOn[id] = !gJumpEdgeBeamOn[id];
+	if (gJumpEdgeBeamOn[id]) {
+		createJumpEdgeBeamForPlayer(id);
+	} else {
+		deleteJumpEdgeBeamForPlayer(id);
+	}
+}
+
+/**
+ * Create the entities used for the distance beam for the given player.
+ */
+createDistanceBeamForPlayer(id) {
+	//create distance beam entity
+	new ent = Beam_Create(gszDotSprite, gDistanceBeamWidth);
+	entity_set_string(gDistanceBeam[id], EV_SZ_classname, gszDistanceBeamClassname);
+	entity_set_int(gDistanceBeam[id], EV_INT_groupinfo, id);
+	gDistanceBeam[id] = ent;
+	
+	//create 3 new entities to use for the distance digits
+	for (new i = 0; i < 3; ++i) {
+		ent = create_entity(gszInfoTarget);
+		entity_set_string(ent, EV_SZ_classname, gszDigitClassname);
+		entity_set_model(ent, gszDigits);
+		entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);
+		entity_set_float(ent, EV_FL_renderamt, 0.0);
+		entity_set_vector(ent, EV_VEC_rendercolor, gColor0);
+		entity_set_float(ent, EV_FL_scale, 0.5);
+		entity_set_int(ent, EV_INT_groupinfo, id);
+		gDistanceDigits[id][i] = ent;
+	}
+}
+
+/**
+ * Create the entity used for the jump edge beam for the given player.
+ */
+createJumpEdgeBeamForPlayer(id) {
+	//create jump edge beam entity
+	new ent = Beam_Create(gszDotSprite, gJumpEdgeBeamWidth);
+	entity_set_string(gJumpEdgeBeam[id], EV_SZ_classname, gszJumpEdgeBeamClassname);
+	entity_set_int(gJumpEdgeBeam[id], EV_INT_groupinfo, id);
+	gJumpEdgeBeam[id] = ent;
+}
+
+/**
+ * Delete all entities used for the distance beam for the given player.
+ */
+deleteDistanceBeamForPlayer(id) {
+	if (gDistanceBeam[id] != 0) {
+		remove_entity(gDistanceBeam[id]);
+		gDistanceBeam[id] = 0;
+	}
+	
+	for (new i = 0; i < 3; ++i) {
+		remove_entity(gDistanceDigits[id][i]);
+		gDistanceDigits[id][i] = 0;
+	}
+}
+
+/**
+ * Delete the jump edge entity for the given player.
+ */
+deleteJumpEdgeBeamForPlayer(id) {
+	if (gJumpEdgeBeam[id] != 0) {
+		remove_entity(gJumpEdgeBeam[id]);
+		gJumpEdgeBeam[id] = 0;
+	}
+}
+
+/**
  * Do various traces to get and show the jump information.
  */
-showJumpAids(id) {
+handleJumpAids(id) {
 	static iFlags;
 	static bool:bUpdatedDistanceBeam;
 	static bool:bUpdatedJumpEdgeBeam;
+	static bool:bJumpAidEnabled;
 	
 	iFlags = entity_get_int(id, EV_INT_flags);
 	bUpdatedDistanceBeam = false;
 	bUpdatedJumpEdgeBeam = false;
+	bJumpAidEnabled = (gDistanceBeamOn[id] || gJumpEdgeBeamOn[id]);
 	
-	//if player is alive and has feet on the ground
-	if (is_user_alive(id) && iFlags & FL_ONGROUND) {
+	//if player is alive, has feet on the ground and has a jump aid enabled
+	if (is_user_alive(id) && (iFlags & FL_ONGROUND) && bJumpAidEnabled) {
 		static Float:vTraceEndPos[3];
 		static Float:heightDelta;
 		
@@ -160,21 +283,26 @@ showJumpAids(id) {
 				
 				fHeight = traceDownForDropHeight(id, vJumpEdge);
 				isHj = (fHeight > 69.5);
-				showJumpEdgeBeam(id, vJumpEdge, vNormal, isHj, gJumpEdgeBeamLength);
-				bUpdatedJumpEdgeBeam = true;
 				
-				bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gMaxLjLength, vTraceEndPos);
-				if (bHit) {
-					static Float:fDistance;
-					static iDistance;
-					
-					fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
-					iDistance = floatround(fDistance, floatround_round);
-					
-					if (iDistance >= gMinLjLength) {
-						showDistanceBeam(id, vJumpEdge, vTraceEndPos, vNormal, iDistance, (isHj ? gColorHj : gColorLj));
-//						console_print(id, "fHeight: %f", fHeight);
-						bUpdatedDistanceBeam = true;
+				if (gJumpEdgeBeamOn[id]) {
+					showJumpEdgeBeam(id, vJumpEdge, vNormal, isHj, gJumpEdgeBeamLength);
+					bUpdatedJumpEdgeBeam = true;
+				}
+				
+				if (gDistanceBeamOn[id]) {
+					bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gMaxLjLength, vTraceEndPos);
+					if (bHit) {
+						static Float:fDistance;
+						static iDistance;
+						
+						fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
+						iDistance = floatround(fDistance, floatround_round);
+						
+						if (iDistance >= gMinLjLength) {
+							showDistanceBeam(id, vJumpEdge, vTraceEndPos, vNormal, iDistance, (isHj ? gColorHj : gColorLj));
+//							console_print(id, "fHeight: %f", fHeight);
+							bUpdatedDistanceBeam = true;
+						}
 					}
 				}
 			}
@@ -280,7 +408,7 @@ Float:traceDownForDropHeight(id, const Float:vTraceFrom[3]) {
 }
 
 /**
- * Show the distance beam and distance sprites.
+ * Show the distance beam and distance sprites for the given player..
  */
 showDistanceBeam(id, const Float:vFrom[3], const Float:vTo[3], const Float:vNormal[3], const iDistance, const Float:color[3]) {
 	//update the beam position and color
@@ -296,7 +424,7 @@ showDistanceBeam(id, const Float:vFrom[3], const Float:vTo[3], const Float:vNorm
 }
 
 /**
- * Hide the distance beam and distance sprites.
+ * Hide the distance beam and distance sprites for the given player.
  */
 hideDistanceBeam(id) {
 	Beam_SetColor(gDistanceBeam[id], gColor0);
@@ -306,7 +434,7 @@ hideDistanceBeam(id) {
 }
 
 /**
- * Show the jump edge beam.
+ * Show the jump edge beam for the given player.
  */
 showJumpEdgeBeam(id, const Float:vEdgePos[3], const Float:vNormal[3], const bool:isHj, const Float:length) {
 	new Float:vOrigin[3];
@@ -335,6 +463,9 @@ showJumpEdgeBeam(id, const Float:vEdgePos[3], const Float:vNormal[3], const bool
 	Beam_SetColor(gJumpEdgeBeam[id], (isHj ? gColorHj : gColorLj));
 }
 
+/**
+ * Hide the jump edge beam for the given player.
+ */
 hideJumpEdgeBeam(id) {
 	Beam_SetColor(gJumpEdgeBeam[id], gColor0);
 }
