@@ -56,13 +56,6 @@ new bool:gDistanceBeamOn[33];
 new bool:gJumpEdgeBeamOn[33];
 new bool:gMainMenuOpen[33];
 
-//reusable expressions for all players
-new Float:gvPlayerOrigin[3];
-new Float:gvPlayerDirection[3];
-new Float:gfPlayerAbsMin[3];
-new Float:gfPlayerAbsMax[3];
-new Float:gfPlayerAngles[3];
-
 public plugin_precache() {
 	precache_model(gszDotSprite);
 	precache_model(gszDigits);
@@ -316,28 +309,33 @@ handleJumpAids(id) {
 	if (is_user_alive(id) && (iFlags & FL_ONGROUND) && bJumpAidEnabled) {
 		static Float:vTraceEndPos[3];
 		static Float:heightDelta;
+		static Float:vPlayerOrigin[3];
+		static Float:vPlayerDirection[3];
+		static Float:fPlayerAbsMin[3];
+		static Float:fPlayerAbsMax[3];
+		static Float:fPlayerAngles[3];
 		
 		//get player vectors of interest
-		entity_get_vector(id, EV_VEC_origin, gvPlayerOrigin);
-		entity_get_vector(id, EV_VEC_absmin, gfPlayerAbsMin);
-		entity_get_vector(id, EV_VEC_absmax, gfPlayerAbsMax);
-		entity_get_vector(id, EV_VEC_angles, gfPlayerAngles);
-		gfPlayerAbsMin[2] += 0.9;	//needs doing, dunno why...
+		entity_get_vector(id, EV_VEC_origin, vPlayerOrigin);
+		entity_get_vector(id, EV_VEC_absmin, fPlayerAbsMin);
+		entity_get_vector(id, EV_VEC_absmax, fPlayerAbsMax);
+		entity_get_vector(id, EV_VEC_angles, fPlayerAngles);
+		fPlayerAbsMin[2] += 0.9;	//needs doing, dunno why...
 		
-		//calculate unit vector for the direction the player is facing - the yaw
-		xs_vec_set(gvPlayerDirection, floatcos(gfPlayerAngles[1], degrees), floatsin(gfPlayerAngles[1], degrees), 0.0);
+		//calculate unit vector for the direction the player is facing - the yaw only
+		xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
 		
 		//trace down in front of player, don't care if it hits anything or not
-		traceDownInFrontOfPlayer(id, vTraceEndPos);
+		traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
 		
 		//get height difference between trace end point and players feet
-		heightDelta = (gfPlayerAbsMin[2] - vTraceEndPos[2]);
+		heightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
 		if (heightDelta > 8.0) {
 			static Float:vJumpEdge[3];
 			static Float:vNormal[3];
 			static bool:bHit;
 			
-			bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vJumpEdge, vNormal);
+			bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
 			if (bHit) {
 				static Float:fHeight;
 				static bool:isHj;
@@ -384,16 +382,16 @@ handleJumpAids(id) {
 /**
  * Trace downwards from the players head (EV_VEC_absmax[2]) in front of the player.
  */
-traceDownInFrontOfPlayer(id, Float:vTraceEndPos[3]) {
+traceDownInFrontOfPlayer(id, const Float:vOrigin[3], const Float:vDirection[3], const Float:fAbsMin[3], const Float:fAbsMax[3], Float:vTraceEndPos[3]) {
 	//calculate position that's forward from the player
-	new Float:fOffsetX = gvPlayerDirection[0] * gForwardDist;
-	new Float:fOffsetY = gvPlayerDirection[1] * gForwardDist;
+	new Float:fOffsetX = vDirection[0] * gForwardDist;
+	new Float:fOffsetY = vDirection[1] * gForwardDist;
 	
 	//trace downwards from in front of the player
 	new Float:vTraceFrom[3];
 	new Float:vTraceTo[3];
-	xs_vec_set(vTraceFrom, gvPlayerOrigin[0] + fOffsetX, gvPlayerOrigin[1] + fOffsetY, gfPlayerAbsMax[2]);
-	xs_vec_set(vTraceTo, gvPlayerOrigin[0] + fOffsetX, gvPlayerOrigin[1] + fOffsetY, gfPlayerAbsMin[2] - 100.0);
+	xs_vec_set(vTraceFrom, vOrigin[0] + fOffsetX, vOrigin[1] + fOffsetY, fAbsMax[2]);
+	xs_vec_set(vTraceTo, vOrigin[0] + fOffsetX, vOrigin[1] + fOffsetY, fAbsMin[2] - 100.0);
 	new iTrace = 0;
 	engfunc(EngFunc_TraceLine, vTraceFrom, vTraceTo, IGNORE_MONSTERS, id, iTrace);
 	get_tr2(iTrace, TR_vecEndPos, vTraceEndPos);
@@ -402,13 +400,13 @@ traceDownInFrontOfPlayer(id, Float:vTraceEndPos[3]) {
 /**
  * Trace backwards towards the player to get what they're standing on.
  */
-bool:traceBackwardsTowardsPlayer(id, const Float:vTraceStart[3], Float:vTraceEndPos[3], Float:vNormal[3]) {
-	new Float:fOffsetX = gvPlayerDirection[0] * -(gForwardDist + 10.0);
-	new Float:fOffsetY = gvPlayerDirection[1] * -(gForwardDist + 10.0);
+bool:traceBackwardsTowardsPlayer(id, const Float:vTraceStart[3], const Float:vDirection[3], const Float:fAbsMin[3], Float:vTraceEndPos[3], Float:vNormal[3]) {
+	new Float:fOffsetX = vDirection[0] * -(gForwardDist + 10.0);
+	new Float:fOffsetY = vDirection[1] * -(gForwardDist + 10.0);
 	new Float:vTraceFrom[3];
 	new Float:vTraceTo[3];
-	xs_vec_set(vTraceFrom, vTraceStart[0], vTraceStart[1], gfPlayerAbsMin[2]);
-	xs_vec_set(vTraceTo, vTraceStart[0] + fOffsetX, vTraceStart[1] + fOffsetY, gfPlayerAbsMin[2]);
+	xs_vec_set(vTraceFrom, vTraceStart[0], vTraceStart[1], fAbsMin[2]);
+	xs_vec_set(vTraceTo, vTraceStart[0] + fOffsetX, vTraceStart[1] + fOffsetY, fAbsMin[2]);
 	new iTrace = 0;
 	engfunc(EngFunc_TraceLine, vTraceFrom, vTraceTo, IGNORE_MONSTERS, id, iTrace);
 	
@@ -575,6 +573,9 @@ showDistanceDigits(id, const digits[3], const distance, const Float:vOrigin[3], 
 	}
 }
 
+/**
+ * Print chat messages to given user with color.
+ */
 client_printc(id, print, const szMessage[], {Float,Sql,Result,_}:...) {
 	static szMsg[193];
 	vformat(szMsg, 192, szMessage, 4);
