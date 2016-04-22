@@ -11,6 +11,7 @@
 #pragma semicolon 1;
 
 //constants
+new const gszPrefix[] = "!w[!tJUMPAIDS!w] !g";
 new const gszJumpAidsPrefix[] = "jumpaids";
 new const gszJumpAidsMainMenu[] = "jumpaids_mainmenu";
 new const gszInfoTarget[] = "info_target";
@@ -44,6 +45,8 @@ enum
 };
 
 //global variables
+new gMaxPlayers;
+new gMsgSayText;
 new gDistanceBeam[33];
 new gJumpEdgeBeam[33];
 new gDistanceDigits[33][3];
@@ -88,6 +91,14 @@ public plugin_init() {
 	register_menucmd(register_menuid(gszJumpAidsMainMenu), gKeysMainMenu, "handleMainMenu");
 }
 
+public plugin_cfg() {
+	//set maximum number of players
+	gMaxPlayers = get_maxplayers();
+	
+	//get say text message ID
+	gMsgSayText = get_user_msgid("SayText");
+}
+
 public client_PreThink(id) {
 	handleJumpAids(id);
 }
@@ -126,6 +137,8 @@ public toggleAllJumpAids(id) {
 			gJumpEdgeBeamOn[id] = true;
 			createJumpEdgeBeamForPlayer(id);
 		}
+		
+		client_printc(id, print_chat, "%sAll jump aids enabled.", gszPrefix);
 	} else {
 		//disable all jump aids that are currently enabled
 		if (gDistanceBeamOn[id]) {
@@ -137,6 +150,8 @@ public toggleAllJumpAids(id) {
 			gJumpEdgeBeamOn[id] = false;
 			deleteJumpEdgeBeamForPlayer(id);
 		}
+		
+		client_printc(id, print_chat, "%sAll jump aids disabled.", gszPrefix);
 	}
 	
 	//refresh main menu if it's open
@@ -205,6 +220,8 @@ toggleDistanceBeamForPlayer(id) {
 	} else {
 		deleteDistanceBeamForPlayer(id);
 	}
+	
+	client_printc(id, print_chat, "%sDistance jump aid %sabled.", gszPrefix, (gDistanceBeamOn[id] ? "en" : "dis"));
 }
 
 /**
@@ -217,6 +234,8 @@ toggleJumpEdgeBeamForPlayer(id) {
 	} else {
 		deleteJumpEdgeBeamForPlayer(id);
 	}
+	
+	client_printc(id, print_chat, "%sEdge jump aid %sabled.", gszPrefix, (gJumpEdgeBeamOn[id] ? "en" : "dis"));
 }
 
 /**
@@ -553,5 +572,43 @@ showDistanceDigits(id, const digits[3], const distance, const Float:vOrigin[3], 
 	for (new i = 0; i < 3; ++i) {
 		entity_set_float(gDistanceDigits[id][i], EV_FL_renderamt, 255.0);
 		entity_set_vector(gDistanceDigits[id][i], EV_VEC_rendercolor, color);
+	}
+}
+
+client_printc(id, print, const szMessage[], {Float,Sql,Result,_}:...) {
+	static szMsg[193];
+	vformat(szMsg, 192, szMessage, 4);
+	
+	if (print == print_chat) {
+		new cWhite[2] = {0x01, 0};
+		new cTeam[2] = {0x03, 0};
+		new cGreen[2] = {0x04, 0};
+		
+		replace_all(szMsg, 192, "!w", cWhite);
+		replace_all(szMsg, 192, "!t", cTeam);
+		replace_all(szMsg, 192, "!g", cGreen);
+		
+		if (id > 0 && id <= gMaxPlayers) {
+			if (is_user_connected(id)) {
+				message_begin(MSG_ONE, gMsgSayText, {0, 0, 0}, id);
+				write_byte(id);
+				write_string(szMsg);
+				message_end();
+			}
+		} else if (id == 0) {
+			for (new i = 1; i <= gMaxPlayers; i++) {
+				if (is_user_connected(i)) {
+					message_begin(MSG_ONE, gMsgSayText, {0, 0, 0}, i);
+					write_byte(i);
+					write_string(szMsg);
+					message_end();
+				}
+			}
+		}
+	} else {
+		replace_all(szMsg, 192, "!t", "");
+		replace_all(szMsg, 192, "!g", "");
+		replace_all(szMsg, 192, "!w", "");
+		client_printc(id, print, szMsg);
 	}
 }
