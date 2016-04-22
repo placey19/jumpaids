@@ -10,20 +10,25 @@
 
 #pragma semicolon 1;
 
+new const gszJumpAidsPrefix[] = "jumpaids";
 new const gszInfoTarget[] = "info_target";
 new const gszDigitClassname[] = "jumpaids_digit";
-new const gszDotSprite[] = "sprites/dot.spr";
+new const gszDistanceBeamClassname[] = "jumpaids_distancebeam";
+new const gszJumpEdgeBeamClassname[] = "jumpaids_jumpedgebeam";
+new const gszDotSprite[] = "sprites/jumpaids/dot.spr";
 new const gszDigits[] = "sprites/jumpaids/digits.spr";
 
 //constants
 new const Float:gfDigitOffsetMultipliers[3] = { 0.8, 0.0, 0.8 };
 new const Float:gColor0[3] = { 0.0, 0.0, 0.0 };
 new const Float:gColorLj[3] = { 0.0, 255.0, 0.0 };
-new const Float:gColorHj[3] = { 200.0, 100.0, 0.0 };
+new const Float:gColorHj[3] = { 200.0, 80.0, 0.0 };
 new const Float:gForwardDist = 100.0;		//how far forward the initial trace will start from
 new const Float:gMinLjLength = 100.0;		//minimum length of LJ allowed for distance to be shown
 new const Float:gMaxLjLength = 300.0;		//maximum allowed LJ length
-new const Float:gJumpEdgeBeamWidth = 60.0;	//width of the jump edge beam
+new const Float:gJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
+new const Float:gJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
+new const Float:gDistanceBeamWidth = 2.0;	//width of the distance beam
 
 new giMaxPlayers;
 new gDistanceBeam[33];
@@ -44,45 +49,90 @@ public plugin_precache() {
 
 public plugin_init() {
 	register_plugin(PLUGIN, VERSION, AUTHOR);
+	register_forward(FM_AddToFullPack, "addToFullPack");
 }
 
 public plugin_cfg() {
 	giMaxPlayers = get_maxplayers();
 
 	for (new id = 1; id <= giMaxPlayers; id++) {
-		gDistanceBeam[id] = Beam_Create(gszDotSprite, 2.0);
-		gJumpEdgeBeam[id] = Beam_Create(gszDotSprite, 1.0);
+		//create distance beam entity
+		new ent = Beam_Create(gszDotSprite, gDistanceBeamWidth);
+		entity_set_string(gDistanceBeam[id], EV_SZ_classname, gszDistanceBeamClassname);
+		entity_set_int(gDistanceBeam[id], EV_INT_groupinfo, id);
+		gDistanceBeam[id] = ent;
+		
+		//create jump edge beam entity
+		ent = Beam_Create(gszDotSprite, gJumpEdgeBeamWidth);
+		entity_set_string(gJumpEdgeBeam[id], EV_SZ_classname, gszJumpEdgeBeamClassname);
+		entity_set_int(gJumpEdgeBeam[id], EV_INT_groupinfo, id);
+		gJumpEdgeBeam[id] = ent;
 		
 		//create 3 new entities to use for the distance digits
 		for (new i = 0; i < 3; ++i) {
-			new ent = create_entity(gszInfoTarget);
-			if (is_valid_ent(ent)) {
-				entity_set_string(ent, EV_SZ_classname, gszDigitClassname);
-				entity_set_model(ent, gszDigits);
-				entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);
-				entity_set_float(ent, EV_FL_renderamt, 0.0);
-				entity_set_vector(ent, EV_VEC_rendercolor, gColor0);
-				entity_set_float(ent, EV_FL_scale, 0.5);
-			}
+			ent = create_entity(gszInfoTarget);
+			entity_set_string(ent, EV_SZ_classname, gszDigitClassname);
+			entity_set_model(ent, gszDigits);
+			entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);
+			entity_set_float(ent, EV_FL_renderamt, 0.0);
+			entity_set_vector(ent, EV_VEC_rendercolor, gColor0);
+			entity_set_float(ent, EV_FL_scale, 0.5);
+			entity_set_int(ent, EV_INT_groupinfo, id);
 			gDistanceDigits[id][i] = ent;
 		}
 	}
 }
 
 public client_PreThink(id) {
-	traceAndShowJumpDistance(id);
+	showJumpAids(id);
+}
+
+public addToFullPack(ent_state, ent, edict_t_ent, id, hostflags, player, pSet) {
+	if (is_user_connected(id) && isJumpAidsEntity(ent)) {
+		new entOwner = entity_get_int(ent, EV_INT_groupinfo);
+		if (id != entOwner) {
+			entity_set_float(ent, EV_FL_renderamt, 0.0);
+			return 0;
+		}
+	}
+	
+	return 1;
+}
+
+/**
+ * Test if given entity is a valid JumpAids entity.
+ */
+bool:isJumpAidsEntity(ent) {
+	if (is_valid_ent(ent)) {
+		static gszClassname[32];
+		entity_get_string(ent, EV_SZ_classname, gszClassname, 32);
+		
+		//test length to prevent strfind on smaller classname (14 chars is the smallest jumpaids classname)
+		if (strlen(gszClassname) >= 14 && strfind(gszClassname, gszJumpAidsPrefix) != -1) {
+			return true;
+		}
+	}
+	
+	return false;
 }
 
 /**
  * Do various traces to get and show the jump information.
  */
-traceAndShowJumpDistance(id) {
-	new iFlags = entity_get_int(id, EV_INT_flags);
-	new bool:bUpdatedDistanceBeam = false;
-	new bool:bUpdatedJumpEdgeBeam = false;
-
+showJumpAids(id) {
+	static iFlags;
+	static bool:bUpdatedDistanceBeam;
+	static bool:bUpdatedJumpEdgeBeam;
+	
+	iFlags = entity_get_int(id, EV_INT_flags);
+	bUpdatedDistanceBeam = false;
+	bUpdatedJumpEdgeBeam = false;
+	
 	//if player is alive and has feet on the ground
 	if (is_user_alive(id) && iFlags & FL_ONGROUND) {
+		static Float:vTraceEndPos[3];
+		static Float:heightDelta;
+		
 		//get player vectors of interest
 		entity_get_vector(id, EV_VEC_origin, gvPlayerOrigin);
 		entity_get_vector(id, EV_VEC_absmin, gfPlayerAbsMin);
@@ -94,25 +144,32 @@ traceAndShowJumpDistance(id) {
 		xs_vec_set(gvPlayerDirection, floatcos(gfPlayerAngles[1], degrees), floatsin(gfPlayerAngles[1], degrees), 0.0);
 		
 		//trace down in front of player, don't care if it hits anything or not
-		new Float:vTraceEndPos[3];
 		traceDownInFrontOfPlayer(id, vTraceEndPos);
 		
 		//get height difference between trace end point and players feet
-		new Float:heightDelta = (gfPlayerAbsMin[2] - vTraceEndPos[2]);
+		heightDelta = (gfPlayerAbsMin[2] - vTraceEndPos[2]);
 		if (heightDelta > 8.0) {
-			new Float:vJumpEdge[3];
-			new Float:vNormal[3];
-			new bool:bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vJumpEdge, vNormal);
+			static Float:vJumpEdge[3];
+			static Float:vNormal[3];
+			static bool:bHit;
+			
+			bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vJumpEdge, vNormal);
 			if (bHit) {
-				new Float:fHeight = traceDownForDropHeight(id, vJumpEdge);
-				new bool:isHj = (fHeight > 69.5);
-				showJumpEdgeBeam(id, vJumpEdge, vNormal, isHj, gJumpEdgeBeamWidth);
+				static Float:fHeight;
+				static bool:isHj;
+				
+				fHeight = traceDownForDropHeight(id, vJumpEdge);
+				isHj = (fHeight > 69.5);
+				showJumpEdgeBeam(id, vJumpEdge, vNormal, isHj, gJumpEdgeBeamLength);
 				bUpdatedJumpEdgeBeam = true;
 				
 				bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gMaxLjLength, vTraceEndPos);
 				if (bHit) {
-					new Float:fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
-					new iDistance = floatround(fDistance, floatround_round);
+					static Float:fDistance;
+					static iDistance;
+					
+					fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
+					iDistance = floatround(fDistance, floatround_round);
 					
 					if (iDistance >= gMinLjLength) {
 						showDistanceBeam(id, vJumpEdge, vTraceEndPos, vNormal, iDistance, (isHj ? gColorHj : gColorLj));
@@ -256,12 +313,11 @@ showJumpEdgeBeam(id, const Float:vEdgePos[3], const Float:vNormal[3], const bool
 	if (isHj) {
 		vOrigin[0] = vEdgePos[0] + (-vNormal[0] * 13.0);
 		vOrigin[1] = vEdgePos[1] + (-vNormal[1] * 13.0);
-		vOrigin[2] = vEdgePos[2] + 0.1;
 	} else {
 		vOrigin[0] = vEdgePos[0];
 		vOrigin[1] = vEdgePos[1];
-		vOrigin[2] = vEdgePos[2] + 0.1;
 	}
+	vOrigin[2] = vEdgePos[2] + 0.2;
 	
 	new Float:halfLength = (length / 2.0);
 	
