@@ -74,6 +74,9 @@ public plugin_init() {
 	register_clcmd("jumpaids", "showMainMenu");
 	register_clcmd("say /jumpaids", "showMainMenu");
 	
+	//register CVARs
+	register_cvar("jumpaids_defaulton", "1");	//default condition - all players start with aids! :D
+	
 	//create main menu
 	new size = sizeof(gszMainMenu);
 	add(gszMainMenu, size, "\yJump Aids Main Menu^n^n");
@@ -99,14 +102,23 @@ public client_PreThink(id) {
 public addToFullPack(ent_state, ent, edict_t_ent, id, hostflags, player, pSet) {
 	if (is_user_connected(id) && isJumpAidsEntity(ent)) {
 		new entOwner = entity_get_int(ent, EV_INT_groupinfo);
-		if (id != entOwner) {
-			//ensure players can't see other players jump aids
+		if (id != entOwner && !isSpectating(id, entOwner)) {
+			//ensure players can't see other players jump aids, unless they're spectating them
 			entity_set_float(ent, EV_FL_renderamt, 0.0);
 			return 0;
 		}
 	}
 	
 	return 1;
+}
+
+public client_connect(id) {
+	if (get_cvar_num("jumpaids_defaulton") > 0) {
+		gDistanceBeamOn[id] = true;
+		createDistanceBeamForPlayer(id);
+		gJumpEdgeBeamOn[id] = true;
+		createJumpEdgeBeamForPlayer(id);
+	}
 }
 
 public client_disconnect(id) {
@@ -201,6 +213,14 @@ bool:isJumpAidsEntity(ent) {
 	}
 	
 	return false;
+}
+
+/**
+ * Test if the given player is spectating the target player.
+ */
+bool:isSpectating(id, targetId) {
+	new specId = entity_get_int(id, EV_INT_iuser2);
+	return (targetId == specId);
 }
 
 /**
@@ -414,16 +434,26 @@ bool:traceBackwardsTowardsPlayer(id, const Float:vTraceStart[3], const Float:vDi
 	new Float:fFraction;
 	get_tr2(iTrace, TR_flFraction, fFraction);
 	if (fFraction != 1.0) {
-		get_tr2(iTrace, TR_vecEndPos, vTraceEndPos);
-		get_tr2(iTrace, TR_vecPlaneNormal, vNormal);
-		
-		//ensure the normal is parallel to the ground
-		if (vNormal[2] != 0.0) {
-			vNormal[2] = 0.0;
-			xs_vec_normalize(vNormal, vNormal);
+		//get the classname of the entity that was hit (typically what the player is standing on)
+		new hitEnt = get_tr2(iTrace, TR_pHit);
+		static szHitEntClassname[32];
+		if (is_valid_ent(hitEnt)) {
+			entity_get_string(hitEnt, EV_SZ_classname, szHitEntClassname, 32);
 		}
 		
-		return true;
+		//ignore the hit entity if it's a door - possibly a bhop block
+		if (!equal(szHitEntClassname, "func_door")) {
+			get_tr2(iTrace, TR_vecEndPos, vTraceEndPos);
+			get_tr2(iTrace, TR_vecPlaneNormal, vNormal);
+			
+			//ensure the normal is parallel to the ground
+			if (vNormal[2] != 0.0) {
+				vNormal[2] = 0.0;
+				xs_vec_normalize(vNormal, vNormal);
+			}
+			
+			return true;
+		}
 	}
 	
 	return false;
