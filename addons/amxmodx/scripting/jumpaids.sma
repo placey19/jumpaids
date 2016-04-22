@@ -51,6 +51,7 @@ new gszMainMenu[256];
 new gKeysMainMenu;
 new bool:gDistanceBeamOn[33];
 new bool:gJumpEdgeBeamOn[33];
+new bool:gMainMenuOpen[33];
 
 //reusable expressions for all players
 new Float:gvPlayerOrigin[3];
@@ -73,8 +74,9 @@ public plugin_init() {
 	register_forward(FM_AddToFullPack, "addToFullPack");
 	
 	//register client commands
+	register_clcmd("togglejumpaids", "toggleAllJumpAids");
+	register_clcmd("jumpaids", "showMainMenu");
 	register_clcmd("say /jumpaids", "showMainMenu");
-	register_clcmd("sayteam /jumpaids", "showMainMenu");
 	
 	//create main menu
 	new size = sizeof(gszMainMenu);
@@ -108,6 +110,41 @@ public client_disconnect(id) {
 	deleteJumpEdgeBeamForPlayer(id);
 	gDistanceBeamOn[id] = false;
 	gJumpEdgeBeamOn[id] = false;
+	gMainMenuOpen[id] = false;
+}
+
+public toggleAllJumpAids(id) {
+	new bool:bIsAJumpAidDisabled = (!gDistanceBeamOn[id] || !gJumpEdgeBeamOn[id]);
+	if (bIsAJumpAidDisabled) {
+		//enable all jump aids that are currently disabled
+		if (!gDistanceBeamOn[id]) {
+			gDistanceBeamOn[id] = true;
+			createDistanceBeamForPlayer(id);
+		}
+		
+		if (!gJumpEdgeBeamOn[id]) {
+			gJumpEdgeBeamOn[id] = true;
+			createJumpEdgeBeamForPlayer(id);
+		}
+	} else {
+		//disable all jump aids that are currently enabled
+		if (gDistanceBeamOn[id]) {
+			gDistanceBeamOn[id] = false;
+			deleteDistanceBeamForPlayer(id);
+		}
+		
+		if (gJumpEdgeBeamOn[id]) {
+			gJumpEdgeBeamOn[id] = false;
+			deleteJumpEdgeBeamForPlayer(id);
+		}
+	}
+	
+	//refresh main menu if it's open
+	if (gMainMenuOpen[id]) {
+		showMainMenu(id);
+	}
+	
+	return PLUGIN_HANDLED;
 }
 
 public showMainMenu(id) {
@@ -121,6 +158,7 @@ public showMainMenu(id) {
 	
 	//show the main menu to the player
 	show_menu(id, gKeysMainMenu, szMenu, -1, gszJumpAidsMainMenu);
+	gMainMenuOpen[id] = true;
 	
 	return PLUGIN_HANDLED;
 }
@@ -129,11 +167,15 @@ public handleMainMenu(id, num) {
 	switch (num) {
 		case N1: { toggleDistanceBeamForPlayer(id); }
 		case N2: { toggleJumpEdgeBeamForPlayer(id); }
-		case N0: { return; }
+		case N0: { 
+			gMainMenuOpen[id] = false;
+			return;
+		}
 	}
 	
 	//display menu again
 	showMainMenu(id);
+	gMainMenuOpen[id] = true;
 }
 
 /**
