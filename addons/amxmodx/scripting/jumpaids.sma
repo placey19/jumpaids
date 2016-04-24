@@ -30,6 +30,7 @@ new const Float:gMaxLjLength = 300.0;		//maximum allowed LJ length
 new const Float:gJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
 new const Float:gJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
 new const Float:gDistanceBeamWidth = 2.0;	//width of the distance beam
+new const OWNER_INT = EV_INT_iuser4;
 
 //enum for menu option values
 enum
@@ -100,8 +101,8 @@ public client_PreThink(id) {
 }
 
 public addToFullPack(ent_state, e, ent, host, hostflags, player, pSet) {
-	if (is_user_connected(host) && isJumpAidsEntity(ent)) {
-		new entOwner = entity_get_int(ent, EV_INT_groupinfo);
+	if (!player && is_user_connected(host) && isJumpAidsEntity(ent)) {
+		new entOwner = entity_get_int(ent, OWNER_INT);
 		
 		//ensure players can't see other players jump aids, unless they're spectating them
 		if (host != entOwner && !isSpectating(host, entOwner)) {
@@ -109,7 +110,7 @@ public addToFullPack(ent_state, e, ent, host, hostflags, player, pSet) {
 		}
 	}
 	
-	return FMRES_IGNORED;
+	return 1;
 }
 
 public client_connect(id) {
@@ -257,7 +258,7 @@ createDistanceBeamForPlayer(id) {
 	//create distance beam entity
 	new ent = Beam_Create(gszDotSprite, gDistanceBeamWidth);
 	entity_set_string(ent, EV_SZ_classname, gszDistanceBeamClassname);	//to recognise the entity
-	entity_set_int(ent, EV_INT_groupinfo, id);				//to know who it belongs to
+	entity_set_int(ent, OWNER_INT, id);					//to know who it belongs to
 	gDistanceBeam[id] = ent;
 	
 	//create 3 new entities to use for the distance digits
@@ -269,7 +270,7 @@ createDistanceBeamForPlayer(id) {
 		entity_set_float(ent, EV_FL_renderamt, 0.0);			//start invisible
 		entity_set_vector(ent, EV_VEC_rendercolor, gColor0);		//start without a color
 		entity_set_float(ent, EV_FL_scale, 0.5);			//make half the size
-		entity_set_int(ent, EV_INT_groupinfo, id);			//to know who it belongs to
+		entity_set_int(ent, OWNER_INT, id);				//to know who it belongs to
 		gDistanceDigits[id][i] = ent;
 	}
 }
@@ -281,7 +282,7 @@ createJumpEdgeBeamForPlayer(id) {
 	//create jump edge beam entity
 	new ent = Beam_Create(gszDotSprite, gJumpEdgeBeamWidth);
 	entity_set_string(ent, EV_SZ_classname, gszJumpEdgeBeamClassname);	//to recognise the entity
-	entity_set_int(ent, EV_INT_groupinfo, id);				//to know who it belongs to
+	entity_set_int(ent, OWNER_INT, id);					//to know who it belongs to
 	gJumpEdgeBeam[id] = ent;
 }
 
