@@ -206,9 +206,9 @@ public handleMainMenu(id, num) {
  */
 bool:isJumpAidsEntity(ent) {
 	if (is_valid_ent(ent)) {
-		static gszClassname[32];
-		entity_get_string(ent, EV_SZ_classname, gszClassname, 32);
-		if (strfind(gszClassname, gszJumpAidsPrefix) != -1) {
+		static szClassname[32];
+		entity_get_string(ent, EV_SZ_classname, szClassname, 32);
+		if (strfind(szClassname, gszJumpAidsPrefix) != -1) {
 			return true;
 		}
 	}
@@ -354,7 +354,7 @@ bool:traceBackwardsTowardsPlayer(id, const Float:vTraceStart[3], const Float:vDi
 		}
 		
 		//ignore the hit entity if it's a door - possibly a bhop block
-		if (!equal(szHitEntClassname, "func_door")) {
+		if (!is_valid_ent(hitEnt) || !equal(szHitEntClassname, "func_door")) {
 			get_tr2(iTrace, TR_vecEndPos, vTraceEndPos);
 			get_tr2(iTrace, TR_vecPlaneNormal, vNormal);
 			
