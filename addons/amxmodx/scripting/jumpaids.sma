@@ -33,7 +33,7 @@ new const Float:gfMaxLjLength = 300.0;		//maximum allowed LJ length
 new const Float:gfDistanceBeamWidth = 2.0;	//width of the distance beam
 new const Float:gfJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
 new const Float:gfJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
-new const Float:gfHeadBangTraceHeight = 50.0;	//height above players head to trace for headbangers
+new const Float:gfHeadBangTraceHeight = 45.0;	//height above players head to trace for headbangers
 
 //enum for menu option values
 enum
