@@ -6,7 +6,7 @@
 #include "beams.inc"
 
 #define PLUGIN		"JumpAids"
-#define VERSION		"1.0"
+#define VERSION		"1.1b"
 #define AUTHOR		"Necro"
 
 #define OWNER_INT	EV_INT_iuser4
@@ -17,9 +17,11 @@ new const gszInfoTarget[] = "info_target";
 new const gszJumpAidsPrefix[] = "jumpaids";
 new const gszJumpAidsMainMenu[] = "jumpaids_mainmenu";
 new const gszDigitClassname[] = "jumpaids_digit";
-new const gszDistanceBeamClassname[] = "jumpaids_distancebeam";
-new const gszJumpEdgeBeamClassname[] = "jumpaids_jumpedgebeam";
+new const gszDistanceClassname[] = "jumpaids_distance";
+new const gszJumpEdgeClassname[] = "jumpaids_jumpedge";
+new const gszHeadBangClassname[] = "jumpaids_headbang";
 new const gszDotSprite[] = "sprites/jumpaids/dot.spr";
+new const gszSmoothDotSprite[] = "sprites/dot.spr";
 new const gszDigits[] = "sprites/jumpaids/digits.spr";
 new const gszCvarDefaultOn[] = "jumpaids_defaulton";
 new const Float:gfDigitOffsetMultipliers[3] = { 0.8, 0.0, 0.8 };
@@ -28,9 +30,9 @@ new const Float:gfColorHj[3] = { 200.0, 80.0, 0.0 };
 new const Float:gfForwardDist = 100.0;		//how far forward the initial trace will start from
 new const Float:gfMinLjLength = 100.0;		//minimum length of LJ allowed for distance to be shown
 new const Float:gfMaxLjLength = 300.0;		//maximum allowed LJ length
-new const Float:gfJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
-new const Float:gfJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
 new const Float:gfDistanceBeamWidth = 2.0;	//width of the distance beam
+new const Float:gfJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
+new const Float:gfJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
 
 //enum for menu option values
 enum
@@ -48,17 +50,20 @@ enum
 //global variables
 new gMaxPlayers;
 new gMsgSayText;
-new gDistanceBeam[33];
-new gJumpEdgeBeam[33];
-new gDistanceDigits[33][3];
+new gDistanceEnt[33];
+new gDistanceValueEnts[33][3];
+new gJumpEdgeEnt[33];
+new gHeadBangEnt[33];
 new gKeysMainMenu;
 new gszMainMenu[256];
-new bool:gbDistanceBeamOn[33];
-new bool:gbJumpEdgeBeamOn[33];
+new bool:gbDistanceOn[33];
+new bool:gbJumpEdgeOn[33];
+new bool:gbHeadBangOn[33];
 new bool:gbMainMenuOpen[33];
 
 public plugin_precache() {
 	precache_model(gszDotSprite);
+	precache_model(gszSmoothDotSprite);
 	precache_model(gszDigits);
 }
 
@@ -74,17 +79,19 @@ public plugin_init() {
 	register_clcmd("togglejumpaids", "toggleAllJumpAids");
 	register_clcmd("jumpaids", "showMainMenu");
 	register_clcmd("say /jumpaids", "showMainMenu");
+	register_clcmd("say /ja", "showMainMenu");
 	
 	//register CVARs
 	register_cvar(gszCvarDefaultOn, "1");	//default condition - all players start with aids! :D
 	
 	//create main menu
 	new size = sizeof(gszMainMenu);
-	add(gszMainMenu, size, "\yJump Aids Main Menu^n^n");
+	add(gszMainMenu, size, "\yJumpAids Menu^n^n");
 	add(gszMainMenu, size, "\r1. \wDistance: %s^n");
-	add(gszMainMenu, size, "\r2. \wEdge: %s^n^n");
+	add(gszMainMenu, size, "\r2. \wEdge: %s^n");
+	add(gszMainMenu, size, "\r3. \wHeadbang: %s^n^n");
 	add(gszMainMenu, size, "\r0. \wClose");
-	gKeysMainMenu = (B1 | B2 | B0);
+	gKeysMainMenu = (B1 | B2 | B3 | B0);
 	register_menucmd(register_menuid(gszJumpAidsMainMenu), gKeysMainMenu, "handleMainMenu");
 }
 
@@ -117,43 +124,34 @@ public addToFullPack(ent_state, e, ent, host, hostflags, player, pSet) {
 
 public client_connect(id) {
 	if (get_cvar_num(gszCvarDefaultOn) > 0) {
-		gbDistanceBeamOn[id] = true;
-		gbJumpEdgeBeamOn[id] = true;
+		gbDistanceOn[id] = true;
+		gbJumpEdgeOn[id] = true;
+		gbHeadBangOn[id] = true;
 	}
 	gbMainMenuOpen[id] = false;
 }
 
 public client_disconnect(id) {
-	hideDistanceBeam(id);
-	hideJumpEdgeBeam(id);
-	gbDistanceBeamOn[id] = false;
-	gbJumpEdgeBeamOn[id] = false;
+	hideDistance(id);
+	hideJumpEdge(id);
+	hideHeadBang(id);
+	gbDistanceOn[id] = false;
+	gbJumpEdgeOn[id] = false;
+	gbHeadBangOn[id] = false;
 	gbMainMenuOpen[id] = false;
 }
 
 public toggleAllJumpAids(const id) {
-	new bool:bIsAJumpAidDisabled = (!gbDistanceBeamOn[id] || !gbJumpEdgeBeamOn[id]);
-	if (bIsAJumpAidDisabled) {
-		//enable all jump aids that are currently disabled
-		if (!gbDistanceBeamOn[id]) {
-			gbDistanceBeamOn[id] = true;
-		}
-		
-		if (!gbJumpEdgeBeamOn[id]) {
-			gbJumpEdgeBeamOn[id] = true;
-		}
-		
+	//toggle all jump aids depending on the state of the distance aid
+	if (!gbDistanceOn[id]) {
+		gbDistanceOn[id] = true;
+		gbJumpEdgeOn[id] = true;
+		gbHeadBangOn[id] = true;
 		client_printc(id, print_chat, "%sAll jump aids enabled.", gszPrefix);
 	} else {
-		//disable all jump aids that are currently enabled
-		if (gbDistanceBeamOn[id]) {
-			gbDistanceBeamOn[id] = false;
-		}
-		
-		if (gbJumpEdgeBeamOn[id]) {
-			gbJumpEdgeBeamOn[id] = false;
-		}
-		
+		gbDistanceOn[id] = false;
+		gbJumpEdgeOn[id] = false;
+		gbHeadBangOn[id] = false;
 		client_printc(id, print_chat, "%sAll jump aids disabled.", gszPrefix);
 	}
 	
@@ -170,9 +168,11 @@ public showMainMenu(const id) {
 	static szMenu[256];
 	static szDistanceState[6];
 	static szJumpEdgeState[6];
-	szDistanceState = (gbDistanceBeamOn[id] ? "\yOn" : "\rOff");
-	szJumpEdgeState = (gbJumpEdgeBeamOn[id] ? "\yOn" : "\rOff");
-	format(szMenu, 256, gszMainMenu, szDistanceState, szJumpEdgeState);
+	static szHeadBangState[6];
+	szDistanceState = (gbDistanceOn[id] ? "\yOn" : "\rOff");
+	szJumpEdgeState = (gbJumpEdgeOn[id] ? "\yOn" : "\rOff");
+	szHeadBangState = (gbHeadBangOn[id] ? "\yOn" : "\rOff");
+	format(szMenu, 256, gszMainMenu, szDistanceState, szJumpEdgeState, szHeadBangState);
 	
 	//show the main menu to the player
 	show_menu(id, gKeysMainMenu, szMenu, -1, gszJumpAidsMainMenu);
@@ -184,12 +184,16 @@ public showMainMenu(const id) {
 public handleMainMenu(const id, const num) {
 	switch (num) {
 		case N1: {
-			gbDistanceBeamOn[id] = !gbDistanceBeamOn[id];
-			client_printc(id, print_chat, "%sDistance jump aid %sabled.", gszPrefix, (gbDistanceBeamOn[id] ? "en" : "dis"));
+			gbDistanceOn[id] = !gbDistanceOn[id];
+			client_printc(id, print_chat, "%sDistance jump aid %sabled.", gszPrefix, (gbDistanceOn[id] ? "en" : "dis"));
 		}
 		case N2: {
-			gbJumpEdgeBeamOn[id] = !gbJumpEdgeBeamOn[id];
-			client_printc(id, print_chat, "%sEdge jump aid %sabled.", gszPrefix, (gbJumpEdgeBeamOn[id] ? "en" : "dis"));
+			gbJumpEdgeOn[id] = !gbJumpEdgeOn[id];
+			client_printc(id, print_chat, "%sEdge jump aid %sabled.", gszPrefix, (gbJumpEdgeOn[id] ? "en" : "dis"));
+		}
+		case N3: {
+			gbHeadBangOn[id] = !gbHeadBangOn[id];
+			client_printc(id, print_chat, "%sHead bang aid %sabled.", gszPrefix, (gbHeadBangOn[id] ? "en" : "dis"));
 		}
 		case N0: {
 			gbMainMenuOpen[id] = false;
@@ -229,18 +233,17 @@ bool:isSpectating(const id, const targetId) {
  * Do various traces to get and show the jump information.
  */
 handleJumpAids(const id) {
-	static flags;
-	static bool:bDistanceBeamVisible;
-	static bool:bJumpEdgeBeamVisible;
+	static bool:bDistanceVisible;
+	static bool:bJumpEdgeVisible;
+	static bool:bHeadBangVisible;
 	static bool:bJumpAidEnabled;
 	
-	flags = entity_get_int(id, EV_INT_flags);
-	bDistanceBeamVisible = false;
-	bJumpEdgeBeamVisible = false;
-	bJumpAidEnabled = (gbDistanceBeamOn[id] || gbJumpEdgeBeamOn[id]);
+	bDistanceVisible = false;
+	bJumpEdgeVisible = false;
+	bHeadBangVisible = false;
+	bJumpAidEnabled = (gbDistanceOn[id] || gbJumpEdgeOn[id] || gbHeadBangOn[id]);
 	
-	//if player is alive, has feet on the ground and has a jump aid enabled
-	if (is_user_alive(id) && (flags & FL_ONGROUND) && bJumpAidEnabled) {
+	if (is_user_alive(id) && bJumpAidEnabled) {
 		static Float:vTraceEndPos[3];
 		static Float:vPlayerOrigin[3];
 		static Float:vPlayerDirection[3];
@@ -259,56 +262,78 @@ handleJumpAids(const id) {
 		//calculate unit vector for the direction the player is facing - the yaw only
 		xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
 		
-		//trace down in front of player, don't care if it hits anything or not
-		traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
-		
-		//get height difference between trace end point and players feet
-		fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
-		if (fHeightDelta > 8.0) {
-			static Float:vJumpEdge[3];
-			static Float:vNormal[3];
-			static bool:bHit;
+		//if the player is on the ground
+		new flags = entity_get_int(id, EV_INT_flags);
+		if (flags & FL_ONGROUND) {
+			//trace down in front of player, don't care if it hits anything or not
+			traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
 			
-			bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
-			if (bHit) {
-				static Float:fHeight;
-				static bool:bIsHj;
+			//get height difference between trace end point and players feet
+			fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
+			if (fHeightDelta > 8.0) {
+				static Float:vJumpEdge[3];
+				static Float:vNormal[3];
+				static bool:bHit;
 				
-				fHeight = traceDownForDropHeight(id, vJumpEdge);
-				bIsHj = (fHeight > 69.5);
-				
-				if (gbJumpEdgeBeamOn[id]) {
-					showJumpEdgeBeam(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
-					bJumpEdgeBeamVisible = true;
-				}
-				
-				if (gbDistanceBeamOn[id]) {
-					bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
-					if (bHit) {
-						static Float:fDistance;
-						static distance;
-						
-						fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
-						distance = floatround(fDistance, floatround_round);
-						
-						if (fDistance >= gfMinLjLength) {
-							showDistanceBeam(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
-							bDistanceBeamVisible = true;
+				bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
+				if (bHit) {
+					static Float:fHeight;
+					static bool:bIsHj;
+					
+					fHeight = traceDownForDropHeight(id, vJumpEdge);
+					bIsHj = (fHeight > 69.5);
+					
+					if (gbJumpEdgeOn[id]) {
+						showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
+						bJumpEdgeVisible = true;
+					}
+					
+					if (gbDistanceOn[id]) {
+						bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
+						if (bHit) {
+							static Float:fDistance;
+							static distance;
+							
+							fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
+							distance = floatround(fDistance, floatround_round);
+							
+							if (fDistance >= gfMinLjLength) {
+								showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
+								bDistanceVisible = true;
+							}
 						}
 					}
 				}
 			}
 		}
+		
+		if (gbHeadBangOn[id]) {
+			static Float:vPlayerViewOffset[3];
+			entity_get_vector(id, EV_VEC_view_ofs, vPlayerViewOffset);
+			
+			new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset, vTraceEndPos);
+			if (fDistance > 0.0) {
+				static Float:fColor[3];
+				xs_vec_set(fColor, 255.0, map(fDistance, 0.0, 50.0, 0.0, 255.0), 0.0);
+				showHeadBang(id, vPlayerOrigin, vPlayerViewOffset, fColor);
+				bHeadBangVisible = true;
+			}
+		}
 	}
-
-	//hide the distance beam and digit sprites if they weren't updated
-	if (!bDistanceBeamVisible) {
-		hideDistanceBeam(id);
+	
+	//hide the distance aid and digit sprites if they weren't updated
+	if (!bDistanceVisible) {
+		hideDistance(id);
 	}
-
-	//hide the jump-edge beam if it wasn't updated
-	if (!bJumpEdgeBeamVisible) {
-		hideJumpEdgeBeam(id);
+	
+	//hide the jump-edge aid if it wasn't updated
+	if (!bJumpEdgeVisible) {
+		hideJumpEdge(id);
+	}
+	
+	//hide the head bang aid if it wasn't updated
+	if (!bHeadBangVisible) {
+		hideHeadBang(id);
 	}
 }
 
@@ -399,7 +424,7 @@ bool:traceForwardsForDistance(const id, const Float:vTraceFrom[3], const Float:v
 /**
  * Trace downwards to get the height of the drop.
  */
-Float:traceDownForDropHeight(id, const Float:vTraceFrom[3]) {
+Float:traceDownForDropHeight(const id, const Float:vTraceFrom[3]) {
 	new Float:vTraceTo[3];
 	xs_vec_set(vTraceTo, vTraceFrom[0], vTraceFrom[1], vTraceFrom[2] - 80);
 	
@@ -412,16 +437,59 @@ Float:traceDownForDropHeight(id, const Float:vTraceFrom[3]) {
 }
 
 /**
- * Show the distance beam and distance sprites for the given player..
+ * Trace above the player's head to detect headbangers.
  */
-showDistanceBeam(const id, const Float:vFrom[3], const Float:vTo[3], const Float:vNormal[3], const distance, const Float:fColor[3]) {
-	//create the entities used for the distance beam, if not already created
-	if (gDistanceBeam[id] == 0) {
-		//create distance beam entity
+Float:traceAbovePlayerHead(const id, const Float:vOrigin[3], const Float:fViewOffset[3], Float:vTraceEndPos[3]) {
+	static Float:vMins[3];
+	static Float:vMaxs[3];
+	entity_get_vector(id, EV_VEC_mins, vMins);
+	entity_get_vector(id, EV_VEC_maxs, vMaxs);
+	
+	//calculate a smooth z coordinate using the viewoffset, then compensate for ducking
+	static Float:z;
+	z = (vOrigin[2] + fViewOffset[2] + (vMaxs[2] == 36.0 ? 19.0 : 6.0));
+	
+	static Float:vTraceFrom[3];
+	static Float:vTraceTo[3];
+	static trace = 0;
+	for (new i = 0; i < 5; ++i) {
+		if (i == 0) {		//centre
+			xs_vec_set(vTraceFrom, vOrigin[0], vOrigin[1], z);
+		} else if (i == 1) {	//front left
+			xs_vec_set(vTraceFrom, vOrigin[0] + vMins[0], vOrigin[1] + vMaxs[1], z);
+		} else if (i == 2) {	//front right
+			xs_vec_set(vTraceFrom, vOrigin[0] + vMaxs[0], vOrigin[1] + vMaxs[1], z);
+		} else if (i == 3) {	//back left
+			xs_vec_set(vTraceFrom, vOrigin[0] + vMins[0], vOrigin[1] + vMins[1], z);
+		} else if (i == 4) {	//back right
+			xs_vec_set(vTraceFrom, vOrigin[0] + vMaxs[0], vOrigin[1] + vMins[1], z);
+		}
+		xs_vec_set(vTraceTo, vTraceFrom[0], vTraceFrom[1], vTraceFrom[2] + 50.0);
+		
+		engfunc(EngFunc_TraceLine, vTraceFrom, vTraceTo, IGNORE_MONSTERS, id, trace);
+		
+		//if the trace hit something
+		new Float:fFraction;
+		get_tr2(trace, TR_flFraction, fFraction);
+		if (fFraction != 1.0) {
+			get_tr2(trace, TR_vecEndPos, vTraceEndPos);
+			return get_distance_f(vTraceFrom, vTraceEndPos);
+		}
+	}
+	
+	return 0.0;
+}
+
+/**
+ * Show the distance aid for the given player.
+ */
+showDistance(const id, const Float:vFrom[3], const Float:vTo[3], const Float:vNormal[3], const distance, const Float:fColor[3]) {
+	//create the entities used for the distance aid, if not already created
+	if (gDistanceEnt[id] == 0) {
 		new ent = Beam_Create(gszDotSprite, gfDistanceBeamWidth);
-		entity_set_string(ent, EV_SZ_classname, gszDistanceBeamClassname);	//to recognise the entity
+		entity_set_string(ent, EV_SZ_classname, gszDistanceClassname);	//to recognise the entity
 		entity_set_int(ent, OWNER_INT, id);					//to know who it belongs to
-		gDistanceBeam[id] = ent;
+		gDistanceEnt[id] = ent;
 		
 		//create 3 new entities to use for the distance digits
 		for (new i = 0; i < 3; ++i) {
@@ -433,48 +501,47 @@ showDistanceBeam(const id, const Float:vFrom[3], const Float:vTo[3], const Float
 			entity_set_vector(ent, EV_VEC_rendercolor, fColor);		//start with given color
 			entity_set_float(ent, EV_FL_scale, 0.5);			//make half the size
 			entity_set_int(ent, OWNER_INT, id);				//to know who it belongs to
-			gDistanceDigits[id][i] = ent;
+			gDistanceValueEnts[id][i] = ent;
 		}
 	}
 	
 	//update the beam position and color
-	Beam_PointsInit(gDistanceBeam[id], vFrom, vTo);
-	Beam_SetColor(gDistanceBeam[id], fColor);
+	Beam_PointsInit(gDistanceEnt[id], vFrom, vTo);
+	Beam_SetColor(gDistanceEnt[id], fColor);
 	
 	//calculate position for digits (halfway along the beam) and show the digits
 	new Float:fOffsetX = (vNormal[0] * (distance / 2.0));
 	new Float:fOffsetY = (vNormal[1] * (distance / 2.0));
 	new Float:vPosition[3]; 
 	xs_vec_set(vPosition, vFrom[0] + fOffsetX, vFrom[1] + fOffsetY, vFrom[2]);
-	setupDistanceDigits(gDistanceDigits[id], distance, vPosition, vNormal, fColor);
+	setupDistanceDigits(gDistanceValueEnts[id], distance, vPosition, vNormal, fColor);
 }
 
 /**
- * Delete all entities used for the distance beam for the given player.
+ * Hide all entities used for the distance aid for the given player.
  */
-hideDistanceBeam(id) {
-	if (gDistanceBeam[id] != 0) {
-		remove_entity(gDistanceBeam[id]);
-		gDistanceBeam[id] = 0;
+hideDistance(const id) {
+	if (gDistanceEnt[id] != 0) {
+		remove_entity(gDistanceEnt[id]);
+		gDistanceEnt[id] = 0;
 	}
 	
 	for (new i = 0; i < 3; ++i) {
-		remove_entity(gDistanceDigits[id][i]);
-		gDistanceDigits[id][i] = 0;
+		remove_entity(gDistanceValueEnts[id][i]);
+		gDistanceValueEnts[id][i] = 0;
 	}
 }
 
 /**
- * Show the jump edge beam for the given player.
+ * Show the jump edge aid for the given player.
  */
-showJumpEdgeBeam(id, const Float:vEdgePos[3], const Float:vNormal[3], const bool:bIsHj, const Float:fLength) {
-	//create the entity used for the jump edge beam, if not already created
-	if (gJumpEdgeBeam[id] == 0) {
-		//create jump edge beam entity
+showJumpEdge(const id, const Float:vEdgePos[3], const Float:vNormal[3], const bool:bIsHj, const Float:fLength) {
+	//create the entity used for the jump edge aid, if not already created
+	if (gJumpEdgeEnt[id] == 0) {
 		new ent = Beam_Create(gszDotSprite, gfJumpEdgeBeamWidth);
-		entity_set_string(ent, EV_SZ_classname, gszJumpEdgeBeamClassname);	//to recognise the entity
+		entity_set_string(ent, EV_SZ_classname, gszJumpEdgeClassname);		//to recognise the entity
 		entity_set_int(ent, OWNER_INT, id);					//to know who it belongs to
-		gJumpEdgeBeam[id] = ent;
+		gJumpEdgeEnt[id] = ent;
 	}
 	
 	new Float:vOrigin[3];
@@ -499,17 +566,74 @@ showJumpEdgeBeam(id, const Float:vEdgePos[3], const Float:vNormal[3], const bool
 	vTo[1] = vOrigin[1] + (-vNormal[0] * fHalfLength);
 	vTo[2] = vOrigin[2];
 	
-	Beam_PointsInit(gJumpEdgeBeam[id], vFrom, vTo); 
-	Beam_SetColor(gJumpEdgeBeam[id], (bIsHj ? gfColorHj : gfColorLj));
+	Beam_PointsInit(gJumpEdgeEnt[id], vFrom, vTo); 
+	Beam_SetColor(gJumpEdgeEnt[id], (bIsHj ? gfColorHj : gfColorLj));
 }
 
 /**
- * Delete the jump edge entity for the given player.
+ * Hide the jump edge aid for the given player.
  */
-hideJumpEdgeBeam(id) {
-	if (gJumpEdgeBeam[id] != 0) {
-		remove_entity(gJumpEdgeBeam[id]);
-		gJumpEdgeBeam[id] = 0;
+hideJumpEdge(const id) {
+	if (gJumpEdgeEnt[id] != 0) {
+		remove_entity(gJumpEdgeEnt[id]);
+		gJumpEdgeEnt[id] = 0;
+	}
+}
+
+/**
+ * Show the head bang aid for the given player.
+ */
+showHeadBang(const id, const Float:vOrigin[3], const Float:vViewOffset[3], const Float:fColor[3]) {
+	//create the entity used for the head bang indicator, if not already created
+	if (gHeadBangEnt[id] == 0) {
+		new ent = create_entity(gszInfoTarget);
+		entity_set_string(ent, EV_SZ_classname, gszHeadBangClassname);		//to recognise the entity
+		entity_set_model(ent, gszSmoothDotSprite);				//the -smooth- dot sprite
+		entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);		//to render with background transparency
+		entity_set_float(ent, EV_FL_renderamt, 255.0);				//start visible
+		entity_set_int(ent, OWNER_INT, id);					//to know who it belongs to
+		entity_set_float(ent, EV_FL_scale, 0.25);				//quarter size
+		gHeadBangEnt[id] = ent;
+	}
+	
+	//get player data that we need
+	static Float:vViewAngles[3];
+	static Float:vForward[3];
+	static Float:vUp[3];
+	entity_get_vector(id, EV_VEC_v_angle, vViewAngles);
+	angle_vector(vViewAngles, ANGLEVECTOR_FORWARD, vForward);
+	angle_vector(vViewAngles, ANGLEVECTOR_UP, vUp);
+	
+	//calculate the position
+	static Float:fOffsetX;
+	static Float:fOffsetY;
+	static Float:fOffsetZ;
+	static Float:vPos[3];
+	fOffsetX = (vForward[0] * 8.0) + (vUp[0] * 6.0);
+	fOffsetY = (vForward[1] * 8.0) + (vUp[1] * 6.0);
+	fOffsetZ = (vForward[2] * 8.0) + (vUp[2] * 6.0);
+	xs_vec_set(vPos, vOrigin[0] + fOffsetX, vOrigin[1] + fOffsetY, vOrigin[2] + vViewOffset[2] + fOffsetZ);
+	
+	//calculate the angles by negating the forward vector
+	static Float:vAngles[3];
+	xs_vec_neg(vForward, vForward);
+	vector_to_angle(vForward, vAngles);
+	vAngles[2] = 45.0;
+	
+	//setup the position, orientation, color and size of the indicator
+	entity_set_vector(gHeadBangEnt[id], EV_VEC_origin, vPos);
+	entity_set_vector(gHeadBangEnt[id], EV_VEC_angles, vAngles);
+	entity_set_vector(gHeadBangEnt[id], EV_VEC_rendercolor, fColor);
+	entity_set_size(gHeadBangEnt[id], Float:{ -1.0, -1.0, -1.0 }, Float:{ 1.0, 1.0, 1.0 });
+}
+
+/**
+ * Hide the head bang entity for the given player.
+ */
+hideHeadBang(const id) {
+	if (gHeadBangEnt[id] != 0) {
+		remove_entity(gHeadBangEnt[id]);
+		gHeadBangEnt[id] = 0;
 	}
 }
 
@@ -551,9 +675,16 @@ setupDistanceDigits(const digits[3], const distance, const Float:vOrigin[3], con
 }
 
 /**
+ * Re-maps a number from one range to another.
+ */
+Float:map(const Float:fVal, const Float:fInMin, const Float:fInMax, const Float:fOutMin, const Float:fOutMax) {
+	return (fVal - fInMin) * (fOutMax - fOutMin) / (fInMax - fInMin) + fOutMin;
+}
+
+/**
  * Print chat messages to given user with color.
  */
-client_printc(id, print, const szMessage[], {Float,Sql,Result,_}:...) {
+client_printc(const id, const print, const szMessage[], const {Float,Sql,Result,_}:...) {
 	static szMsg[193];
 	vformat(szMsg, 192, szMessage, 4);
 	
