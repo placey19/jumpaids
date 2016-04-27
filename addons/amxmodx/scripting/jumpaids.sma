@@ -193,7 +193,7 @@ public handleMainMenu(const id, const num) {
 		}
 		case N3: {
 			gbHeadBangOn[id] = !gbHeadBangOn[id];
-			client_printc(id, print_chat, "%sHead bang aid %sabled.", gszPrefix, (gbHeadBangOn[id] ? "en" : "dis"));
+			client_printc(id, print_chat, "%sHeadbang jump aid %sabled.", gszPrefix, (gbHeadBangOn[id] ? "en" : "dis"));
 		}
 		case N0: {
 			gbMainMenuOpen[id] = false;
@@ -314,7 +314,7 @@ handleJumpAids(const id) {
 			new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset, vTraceEndPos);
 			if (fDistance > 0.0) {
 				static Float:fColor[3];
-				xs_vec_set(fColor, 255.0, map(fDistance, 0.0, 50.0, 0.0, 255.0), 0.0);
+				xs_vec_set(fColor, 128.0, map(fDistance, 0.0, 50.0, 0.0, 128.0), 0.0);
 				showHeadBang(id, vPlayerOrigin, vPlayerViewOffset, fColor);
 				bHeadBangVisible = true;
 			}
@@ -331,7 +331,7 @@ handleJumpAids(const id) {
 		hideJumpEdge(id);
 	}
 	
-	//hide the head bang aid if it wasn't updated
+	//hide the headbang aid if it wasn't updated
 	if (!bHeadBangVisible) {
 		hideHeadBang(id);
 	}
@@ -581,10 +581,10 @@ hideJumpEdge(const id) {
 }
 
 /**
- * Show the head bang aid for the given player.
+ * Show the headbang aid for the given player.
  */
 showHeadBang(const id, const Float:vOrigin[3], const Float:vViewOffset[3], const Float:fColor[3]) {
-	//create the entity used for the head bang indicator, if not already created
+	//create the entity used for the headbang indicator, if not already created
 	if (gHeadBangEnt[id] == 0) {
 		new ent = create_entity(gszInfoTarget);
 		entity_set_string(ent, EV_SZ_classname, gszHeadBangClassname);		//to recognise the entity
@@ -628,7 +628,7 @@ showHeadBang(const id, const Float:vOrigin[3], const Float:vViewOffset[3], const
 }
 
 /**
- * Hide the head bang entity for the given player.
+ * Hide the headbang entity for the given player.
  */
 hideHeadBang(const id) {
 	if (gHeadBangEnt[id] != 0) {
