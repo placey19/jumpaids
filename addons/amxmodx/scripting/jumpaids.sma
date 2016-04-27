@@ -33,6 +33,7 @@ new const Float:gfMaxLjLength = 300.0;		//maximum allowed LJ length
 new const Float:gfDistanceBeamWidth = 2.0;	//width of the distance beam
 new const Float:gfJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
 new const Float:gfJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
+new const Float:gfHeadBangTraceHeight = 50.0;	//height above players head to trace for headbangers
 
 //enum for menu option values
 enum
@@ -311,10 +312,10 @@ handleJumpAids(const id) {
 			static Float:vPlayerViewOffset[3];
 			entity_get_vector(id, EV_VEC_view_ofs, vPlayerViewOffset);
 			
-			new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset, vTraceEndPos);
+			new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset);
 			if (fDistance > 0.0) {
 				static Float:fColor[3];
-				xs_vec_set(fColor, 128.0, map(fDistance, 0.0, 50.0, 0.0, 128.0), 0.0);
+				xs_vec_set(fColor, 128.0, map(fDistance, 0.0, gfHeadBangTraceHeight, 0.0, 128.0), 0.0);
 				showHeadBang(id, vPlayerOrigin, vPlayerViewOffset, fColor);
 				bHeadBangVisible = true;
 			}
@@ -439,7 +440,7 @@ Float:traceDownForDropHeight(const id, const Float:vTraceFrom[3]) {
 /**
  * Trace above the player's head to detect headbangers.
  */
-Float:traceAbovePlayerHead(const id, const Float:vOrigin[3], const Float:fViewOffset[3], Float:vTraceEndPos[3]) {
+Float:traceAbovePlayerHead(const id, const Float:vOrigin[3], const Float:fViewOffset[3]) {
 	static Float:vMins[3];
 	static Float:vMaxs[3];
 	entity_get_vector(id, EV_VEC_mins, vMins);
@@ -464,7 +465,7 @@ Float:traceAbovePlayerHead(const id, const Float:vOrigin[3], const Float:fViewOf
 		} else if (i == 4) {	//back right
 			xs_vec_set(vTraceFrom, vOrigin[0] + vMaxs[0], vOrigin[1] + vMins[1], z);
 		}
-		xs_vec_set(vTraceTo, vTraceFrom[0], vTraceFrom[1], vTraceFrom[2] + 50.0);
+		xs_vec_set(vTraceTo, vTraceFrom[0], vTraceFrom[1], vTraceFrom[2] + gfHeadBangTraceHeight);
 		
 		engfunc(EngFunc_TraceLine, vTraceFrom, vTraceTo, IGNORE_MONSTERS, id, trace);
 		
@@ -472,6 +473,7 @@ Float:traceAbovePlayerHead(const id, const Float:vOrigin[3], const Float:fViewOf
 		new Float:fFraction;
 		get_tr2(trace, TR_flFraction, fFraction);
 		if (fFraction != 1.0) {
+			static Float:vTraceEndPos[3];
 			get_tr2(trace, TR_vecEndPos, vTraceEndPos);
 			return get_distance_f(vTraceFrom, vTraceEndPos);
 		}
