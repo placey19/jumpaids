@@ -62,6 +62,7 @@ new bool:gbJumpEdgeOn[33];
 new bool:gbHeadBangOn[33];
 new bool:gbMainMenuOpen[33];
 new Float:gfHeadBangHudIconColor[33][3];
+new Float:gfGroundTime[33];
 
 public plugin_precache() {
 	precache_model(gszDotSprite);
@@ -133,6 +134,10 @@ public client_connect(id) {
 		gbHeadBangOn[id] = true;
 	}
 	gbMainMenuOpen[id] = false;
+}
+
+public client_spawn(id) {
+	hideHeadBangHudIcon(id);
 }
 
 public client_disconnect(id) {
@@ -240,85 +245,113 @@ handleJumpAids(const id) {
 	static bool:bJumpEdgeVisible;
 	static bool:bHeadBangVisible;
 	static bool:bJumpAidEnabled;
+	static bool:isOnGround;
+	static Float:timeOffGround;
+	static flags;
 	
 	bDistanceVisible = false;
 	bJumpEdgeVisible = false;
 	bHeadBangVisible = false;
 	bJumpAidEnabled = (gbDistanceOn[id] || gbJumpEdgeOn[id] || gbHeadBangOn[id]);
 	
-	//if the player is on the ground
-	new flags = entity_get_int(id, EV_INT_flags);
-	if (is_user_alive(id) && (flags & FL_ONGROUND) && bJumpAidEnabled) {
-		static Float:vTraceEndPos[3];
-		static Float:vPlayerOrigin[3];
-		static Float:vPlayerDirection[3];
-		static Float:fPlayerAbsMin[3];
-		static Float:fPlayerAbsMax[3];
-		static Float:fPlayerAngles[3];
-		static Float:fHeightDelta;
+	//get whether or not the player is on the ground
+	flags = entity_get_int(id, EV_INT_flags);
+	isOnGround = (flags & FL_ONGROUND > 0 ? true : false);
+	
+	timeOffGround = 0.0;
+	if (is_user_alive(id)) {
+		//get the amount of time the player has been off the ground (in the air or water)
+		if (!isOnGround) {
+			if (gfGroundTime[id] == 0.0) {
+				gfGroundTime[id] = halflife_time();
+			} else {
+				timeOffGround = (halflife_time() - gfGroundTime[id]);
+			}
+		} else if (gfGroundTime[id] != 0.0) {
+			gfGroundTime[id] = 0.0;
+		}
 		
-		//get player vectors of interest
-		entity_get_vector(id, EV_VEC_origin, vPlayerOrigin);
-		entity_get_vector(id, EV_VEC_absmin, fPlayerAbsMin);
-		entity_get_vector(id, EV_VEC_absmax, fPlayerAbsMax);
-		entity_get_vector(id, EV_VEC_angles, fPlayerAngles);
-		fPlayerAbsMin[2] += 0.9;	//needs doing, dunno why...
-		
-		//calculate unit vector for the direction the player is facing - the yaw only
-		xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
-		
-		//trace down in front of player, don't care if it hits anything or not
-		traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
-		
-		//get height difference between trace end point and players feet
-		fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
-		if (fHeightDelta > 8.0) {
-			static Float:vJumpEdge[3];
-			static Float:vNormal[3];
-			static bool:bHit;
+		if (isOnGround && bJumpAidEnabled) {
+			static Float:vTraceEndPos[3];
+			static Float:vPlayerOrigin[3];
+			static Float:vPlayerDirection[3];
+			static Float:fPlayerAbsMin[3];
+			static Float:fPlayerAbsMax[3];
+			static Float:fPlayerAngles[3];
+			static Float:fHeightDelta;
 			
-			bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
-			if (bHit) {
-				static Float:fHeight;
-				static bool:bIsHj;
+			//get player vectors of interest
+			entity_get_vector(id, EV_VEC_origin, vPlayerOrigin);
+			entity_get_vector(id, EV_VEC_absmin, fPlayerAbsMin);
+			entity_get_vector(id, EV_VEC_absmax, fPlayerAbsMax);
+			entity_get_vector(id, EV_VEC_angles, fPlayerAngles);
+			fPlayerAbsMin[2] += 0.9;	//needs doing, dunno why...
+			
+			//calculate unit vector for the direction the player is facing - the yaw only
+			xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
+			
+			//trace down in front of player, don't care if it hits anything or not
+			traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
+			
+			//get height difference between trace end point and players feet
+			fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
+			if (fHeightDelta > 8.0) {
+				static Float:vJumpEdge[3];
+				static Float:vNormal[3];
+				static bool:bHit;
 				
-				fHeight = traceDownForDropHeight(id, vJumpEdge);
-				bIsHj = (fHeight > 69.5);
-				
-				if (gbJumpEdgeOn[id]) {
-					showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
-					bJumpEdgeVisible = true;
-				}
-				
-				if (gbDistanceOn[id]) {
-					bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
-					if (bHit) {
-						static Float:fDistance;
-						static distance;
-						
-						fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
-						distance = floatround(fDistance, floatround_round);
-						
-						if (fDistance >= gfMinLjLength) {
-							showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
-							bDistanceVisible = true;
+				bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
+				if (bHit) {
+					static Float:fHeight;
+					static bool:bIsHj;
+					
+					fHeight = traceDownForDropHeight(id, vJumpEdge);
+					bIsHj = (fHeight > 69.5);
+					
+					if (gbJumpEdgeOn[id]) {
+						showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
+						bJumpEdgeVisible = true;
+					}
+					
+					if (gbDistanceOn[id]) {
+						bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
+						if (bHit) {
+							static Float:fDistance;
+							static distance;
+							
+							fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
+							distance = floatround(fDistance, floatround_round);
+							
+							if (fDistance >= gfMinLjLength) {
+								showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
+								bDistanceVisible = true;
+							}
 						}
 					}
 				}
 			}
-		}
-		
-		if (gbHeadBangOn[id]) {
-			static Float:vPlayerViewOffset[3];
-			entity_get_vector(id, EV_VEC_view_ofs, vPlayerViewOffset);
 			
-			new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset);
-			if (fDistance > 0.0) {
-				static Float:fColor[3];
-				xs_vec_set(fColor, 128.0, map(fDistance, 0.0, gfHeadBangTraceHeight, 0.0, 128.0), 0.0);
-				showHeadBangHudIcon(id, fColor);
-				bHeadBangVisible = true;
+			if (gbHeadBangOn[id]) {
+				static Float:vPlayerViewOffset[3];
+				entity_get_vector(id, EV_VEC_view_ofs, vPlayerViewOffset);
+				
+				new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset);
+				if (fDistance > 0.0) {
+					static Float:fColor[3];
+					xs_vec_set(fColor, 128.0, map(fDistance, 0.0, gfHeadBangTraceHeight, 0.0, 128.0), 0.0);
+					showHeadBangHudIcon(id, fColor);
+					bHeadBangVisible = true;
+				}
 			}
+		}
+	}
+	
+	//handle headbang aid for spectators
+	if (!is_user_alive(id)) {
+		new specId = entity_get_int(id, EV_INT_iuser2);
+		if (specId != 0) {
+			showHeadBangHudIcon(id, gfHeadBangHudIconColor[specId]);
+			bHeadBangVisible = true;
 		}
 	}
 	
@@ -333,13 +366,14 @@ handleJumpAids(const id) {
 	}
 	
 	//hide the headbang aid if it wasn't updated
-	if (!bHeadBangVisible && (flags & FL_ONGROUND)) {
+	if (!bHeadBangVisible && (!is_user_alive(id) || isOnGround || timeOffGround > 0.75)) {
 		hideHeadBangHudIcon(id);
 	}
 }
 
 /**
- * Show the headbang hud icon to the given player and spectators of that player.
+ * Show the headbang hud icon to the given player. Messages won't be sent to the client unless the
+ * data has changed so repetitive calls to this method is ok.
  */
 showHeadBangHudIcon(const id, const Float:fColor[3]) {
 	if (!xs_vec_equal(gfHeadBangHudIconColor[id], fColor)) {
@@ -356,7 +390,8 @@ showHeadBangHudIcon(const id, const Float:fColor[3]) {
 }
 
 /**
- * Hide the hud headbanger icon for the given player and spectators of that player.
+ * Hide the hud headbanger icon for the given player. Messages won't be sent to the client unless the
+ * data has changed so repetitive calls to this method is ok.
  */
 hideHeadBangHudIcon(const id) {
 	if (!xs_vec_equal(gfHeadBangHudIconColor[id], Float:{ 0.0, 0.0, 0.0 })) {
