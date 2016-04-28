@@ -6,10 +6,11 @@
 #include "beams.inc"
 
 #define PLUGIN		"JumpAids"
-#define VERSION		"1.1b"
+#define VERSION		"1.2"
 #define AUTHOR		"Necro"
 
-#define OWNER_INT	EV_INT_iuser4
+#define OWNER_INT	EV_INT_iuser4		//entity int id to hold the owner of the jumpaids
+#define FREEZE_BUTTONS	IN_USE			//buttons to be pressed by the player to freeze the aids
 
 //constants
 new const gszPrefix[] = "!w[!tJUMPAIDS!w] !g";
@@ -27,13 +28,14 @@ new const gszStatusIconSpriteName[] = "dmg_shock";	//d_headshot
 new const Float:gfDigitOffsetMultipliers[3] = { 0.8, 0.0, 0.8 };
 new const Float:gfColorLj[3] = { 0.0, 255.0, 0.0 };
 new const Float:gfColorHj[3] = { 200.0, 80.0, 0.0 };
-new const Float:gfForwardDist = 100.0;		//how far forward the initial trace will start from
+new const Float:gfForwardDist = 125.0;		//how far forward the initial trace will start from
 new const Float:gfMinLjLength = 100.0;		//minimum length of LJ allowed for distance to be shown
 new const Float:gfMaxLjLength = 300.0;		//maximum allowed LJ length
 new const Float:gfDistanceBeamWidth = 2.0;	//width of the distance beam
 new const Float:gfJumpEdgeBeamWidth = 1.0;	//width of the jump edge beam
 new const Float:gfJumpEdgeBeamLength = 60.0;	//length of the jump edge beam
 new const Float:gfHeadBangTraceHeight = 45.0;	//height above players head to trace for headbangers
+new const Float:gfFreezeDuration = 3.0;		//duration that the distance and jumps aids remain frozen
 
 //enum for menu option values
 enum
@@ -63,6 +65,7 @@ new bool:gbHeadBangOn[33];
 new bool:gbMainMenuOpen[33];
 new Float:gfHeadBangHudIconColor[33][3];
 new Float:gfGroundTime[33];
+new Float:gfFreezeTime[33];
 
 public plugin_precache() {
 	precache_model(gszDotSprite);
@@ -105,7 +108,6 @@ public plugin_cfg() {
 	//get message ids
 	gMsgSayText = get_user_msgid("SayText");
 	gMsgStatusIcon = get_user_msgid("StatusIcon");
-	
 }
 
 public client_PostThink(id) {
@@ -249,8 +251,8 @@ handleJumpAids(const id) {
 	static Float:timeOffGround;
 	static flags;
 	
-	bDistanceVisible = false;
-	bJumpEdgeVisible = false;
+	bDistanceVisible = (gfFreezeTime[id] > 0.0);
+	bJumpEdgeVisible = (gfFreezeTime[id] > 0.0);
 	bHeadBangVisible = false;
 	bJumpAidEnabled = (gbDistanceOn[id] || gbJumpEdgeOn[id] || gbHeadBangOn[id]);
 	
@@ -287,44 +289,45 @@ handleJumpAids(const id) {
 			entity_get_vector(id, EV_VEC_angles, fPlayerAngles);
 			fPlayerAbsMin[2] += 0.9;	//needs doing, dunno why...
 			
-			//calculate unit vector for the direction the player is facing - the yaw only
-			xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
+			//if the distance and edge aids aren't frozen
+			if (gfFreezeTime[id] == 0.0) {
+				//calculate unit vector for the direction the player is facing - the yaw only
+				xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
 			
-			//trace down in front of player, don't care if it hits anything or not
-			traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
-			
-			//get height difference between trace end point and players feet
-			fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
-			if (fHeightDelta > 8.0) {
-				static Float:vJumpEdge[3];
-				static Float:vNormal[3];
-				static bool:bHit;
+				//trace down in front of player, don't care if it hits anything or not
+				traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
 				
-				bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
-				if (bHit) {
-					static Float:fHeight;
-					static bool:bIsHj;
+				//get height difference between trace end point and players feet
+				fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
+				if (fHeightDelta > 8.0) {
+					static Float:vJumpEdge[3];
+					static Float:vNormal[3];
+					static bool:bHit;
 					
-					fHeight = traceDownForDropHeight(id, vJumpEdge);
-					bIsHj = (fHeight > 69.5);
-					
-					if (gbJumpEdgeOn[id]) {
-						showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
-						bJumpEdgeVisible = true;
-					}
-					
-					if (gbDistanceOn[id]) {
-						bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
-						if (bHit) {
-							static Float:fDistance;
-							static distance;
-							
-							fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
-							distance = floatround(fDistance, floatround_round);
-							
-							if (fDistance >= gfMinLjLength) {
-								showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
-								bDistanceVisible = true;
+					bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
+					if (bHit) {
+						static Float:fHeight;
+						static bool:bIsHj;
+						fHeight = traceDownForDropHeight(id, vJumpEdge);
+						bIsHj = (fHeight > 69.5);
+						
+						if (gbJumpEdgeOn[id]) {
+							showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
+							bJumpEdgeVisible = true;
+						}
+						
+						if (gbDistanceOn[id]) {
+							bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
+							if (bHit) {
+								static Float:fDistance;
+								static distance;
+								fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
+								distance = floatround(fDistance, floatround_round);
+								
+								if (fDistance >= gfMinLjLength) {
+									showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
+									bDistanceVisible = true;
+								}
 							}
 						}
 					}
@@ -338,7 +341,7 @@ handleJumpAids(const id) {
 				new Float:fDistance = traceAbovePlayerHead(id, vPlayerOrigin, vPlayerViewOffset);
 				if (fDistance > 0.0) {
 					static Float:fColor[3];
-					xs_vec_set(fColor, 128.0, map(fDistance, 0.0, gfHeadBangTraceHeight, 0.0, 128.0), 0.0);
+					xs_vec_set(fColor, 255.0, map(fDistance, 0.0, gfHeadBangTraceHeight, 0.0, 255.0), 0.0);
 					showHeadBangHudIcon(id, fColor);
 					bHeadBangVisible = true;
 				}
@@ -355,17 +358,28 @@ handleJumpAids(const id) {
 		}
 	}
 	
-	//hide the distance aid and digit sprites if they weren't updated
-	if (!bDistanceVisible) {
+	//freeze the distance and edge aids when the player presses the use button
+	if (bDistanceVisible || bJumpEdgeVisible) {
+		if (gfFreezeTime[id] == 0.0) {
+			if (entity_get_int(id, EV_INT_button) & FREEZE_BUTTONS == FREEZE_BUTTONS) {
+				gfFreezeTime[id] = halflife_time();
+			}
+		} else if ((halflife_time() - gfFreezeTime[id]) > gfFreezeDuration) {
+			gfFreezeTime[id] = 0.0;
+		}
+	}
+	
+	//hide the distance aid if it's not supposed to be visible and isn't frozen
+	if (!bDistanceVisible && gfFreezeTime[id] == 0.0) {
 		hideDistance(id);
 	}
 	
-	//hide the jump-edge aid if it wasn't updated
-	if (!bJumpEdgeVisible) {
+	//hide the jump-edge aid if it's not supposed to be visible and isn't frozen
+	if (!bJumpEdgeVisible && gfFreezeTime[id] == 0.0) {
 		hideJumpEdge(id);
 	}
 	
-	//hide the headbang aid if it wasn't updated
+	//hide the headbang aid if it's not supposed to be visible
 	if (!bHeadBangVisible && (!is_user_alive(id) || isOnGround || timeOffGround > 0.75)) {
 		hideHeadBangHudIcon(id);
 	}
