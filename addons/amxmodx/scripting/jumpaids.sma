@@ -19,11 +19,11 @@ new const gszJumpAidsMainMenu[] = "jumpaids_mainmenu";
 new const gszDigitClassname[] = "jumpaids_digit";
 new const gszDistanceClassname[] = "jumpaids_distance";
 new const gszJumpEdgeClassname[] = "jumpaids_jumpedge";
-new const gszHeadBangClassname[] = "jumpaids_headbang";
 new const gszDotSprite[] = "sprites/jumpaids/dot.spr";
 new const gszSmoothDotSprite[] = "sprites/dot.spr";
 new const gszDigits[] = "sprites/jumpaids/digits.spr";
 new const gszCvarDefaultOn[] = "jumpaids_defaulton";
+new const gszStatusIconSpriteName[] = "dmg_shock";	//d_headshot
 new const Float:gfDigitOffsetMultipliers[3] = { 0.8, 0.0, 0.8 };
 new const Float:gfColorLj[3] = { 0.0, 255.0, 0.0 };
 new const Float:gfColorHj[3] = { 200.0, 80.0, 0.0 };
@@ -51,16 +51,17 @@ enum
 //global variables
 new gMaxPlayers;
 new gMsgSayText;
+new gMsgStatusIcon;
 new gDistanceEnt[33];
 new gDistanceValueEnts[33][3];
 new gJumpEdgeEnt[33];
-new gHeadBangEnt[33];
 new gKeysMainMenu;
 new gszMainMenu[256];
 new bool:gbDistanceOn[33];
 new bool:gbJumpEdgeOn[33];
 new bool:gbHeadBangOn[33];
 new bool:gbMainMenuOpen[33];
+new Float:gfHeadBangHudIconColor[33][3];
 
 public plugin_precache() {
 	precache_model(gszDotSprite);
@@ -100,8 +101,10 @@ public plugin_cfg() {
 	//set maximum number of players
 	gMaxPlayers = get_maxplayers();
 	
-	//get say text message ID
+	//get message ids
 	gMsgSayText = get_user_msgid("SayText");
+	gMsgStatusIcon = get_user_msgid("StatusIcon");
+	
 }
 
 public client_PostThink(id) {
@@ -135,7 +138,6 @@ public client_connect(id) {
 public client_disconnect(id) {
 	hideDistance(id);
 	hideJumpEdge(id);
-	hideHeadBang(id);
 	gbDistanceOn[id] = false;
 	gbJumpEdgeOn[id] = false;
 	gbHeadBangOn[id] = false;
@@ -244,7 +246,9 @@ handleJumpAids(const id) {
 	bHeadBangVisible = false;
 	bJumpAidEnabled = (gbDistanceOn[id] || gbJumpEdgeOn[id] || gbHeadBangOn[id]);
 	
-	if (is_user_alive(id) && bJumpAidEnabled) {
+	//if the player is on the ground
+	new flags = entity_get_int(id, EV_INT_flags);
+	if (is_user_alive(id) && (flags & FL_ONGROUND) && bJumpAidEnabled) {
 		static Float:vTraceEndPos[3];
 		static Float:vPlayerOrigin[3];
 		static Float:vPlayerDirection[3];
@@ -263,45 +267,41 @@ handleJumpAids(const id) {
 		//calculate unit vector for the direction the player is facing - the yaw only
 		xs_vec_set(vPlayerDirection, floatcos(fPlayerAngles[1], degrees), floatsin(fPlayerAngles[1], degrees), 0.0);
 		
-		//if the player is on the ground
-		new flags = entity_get_int(id, EV_INT_flags);
-		if (flags & FL_ONGROUND) {
-			//trace down in front of player, don't care if it hits anything or not
-			traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
+		//trace down in front of player, don't care if it hits anything or not
+		traceDownInFrontOfPlayer(id, vPlayerOrigin, vPlayerDirection, fPlayerAbsMin, fPlayerAbsMax, vTraceEndPos);
+		
+		//get height difference between trace end point and players feet
+		fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
+		if (fHeightDelta > 8.0) {
+			static Float:vJumpEdge[3];
+			static Float:vNormal[3];
+			static bool:bHit;
 			
-			//get height difference between trace end point and players feet
-			fHeightDelta = (fPlayerAbsMin[2] - vTraceEndPos[2]);
-			if (fHeightDelta > 8.0) {
-				static Float:vJumpEdge[3];
-				static Float:vNormal[3];
-				static bool:bHit;
+			bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
+			if (bHit) {
+				static Float:fHeight;
+				static bool:bIsHj;
 				
-				bHit = traceBackwardsTowardsPlayer(id, vTraceEndPos, vPlayerDirection, fPlayerAbsMin, vJumpEdge, vNormal);
-				if (bHit) {
-					static Float:fHeight;
-					static bool:bIsHj;
-					
-					fHeight = traceDownForDropHeight(id, vJumpEdge);
-					bIsHj = (fHeight > 69.5);
-					
-					if (gbJumpEdgeOn[id]) {
-						showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
-						bJumpEdgeVisible = true;
-					}
-					
-					if (gbDistanceOn[id]) {
-						bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
-						if (bHit) {
-							static Float:fDistance;
-							static distance;
-							
-							fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
-							distance = floatround(fDistance, floatround_round);
-							
-							if (fDistance >= gfMinLjLength) {
-								showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
-								bDistanceVisible = true;
-							}
+				fHeight = traceDownForDropHeight(id, vJumpEdge);
+				bIsHj = (fHeight > 69.5);
+				
+				if (gbJumpEdgeOn[id]) {
+					showJumpEdge(id, vJumpEdge, vNormal, bIsHj, gfJumpEdgeBeamLength);
+					bJumpEdgeVisible = true;
+				}
+				
+				if (gbDistanceOn[id]) {
+					bHit = traceForwardsForDistance(id, vJumpEdge, vNormal, gfMaxLjLength, vTraceEndPos);
+					if (bHit) {
+						static Float:fDistance;
+						static distance;
+						
+						fDistance = get_distance_f(vJumpEdge, vTraceEndPos);
+						distance = floatround(fDistance, floatround_round);
+						
+						if (fDistance >= gfMinLjLength) {
+							showDistance(id, vJumpEdge, vTraceEndPos, vNormal, distance, (bIsHj ? gfColorHj : gfColorLj));
+							bDistanceVisible = true;
 						}
 					}
 				}
@@ -316,7 +316,7 @@ handleJumpAids(const id) {
 			if (fDistance > 0.0) {
 				static Float:fColor[3];
 				xs_vec_set(fColor, 128.0, map(fDistance, 0.0, gfHeadBangTraceHeight, 0.0, 128.0), 0.0);
-				showHeadBang(id, vPlayerOrigin, vPlayerViewOffset, fColor);
+				showHeadBangHudIcon(id, fColor);
 				bHeadBangVisible = true;
 			}
 		}
@@ -333,8 +333,42 @@ handleJumpAids(const id) {
 	}
 	
 	//hide the headbang aid if it wasn't updated
-	if (!bHeadBangVisible) {
-		hideHeadBang(id);
+	if (!bHeadBangVisible && (flags & FL_ONGROUND)) {
+		hideHeadBangHudIcon(id);
+	}
+}
+
+/**
+ * Show the headbang hud icon to the given player and spectators of that player.
+ */
+showHeadBangHudIcon(const id, const Float:fColor[3]) {
+	if (!xs_vec_equal(gfHeadBangHudIconColor[id], fColor)) {
+		message_begin(MSG_ONE, gMsgStatusIcon, { 0, 0, 0 }, id);
+		write_byte(1);
+		write_string(gszStatusIconSpriteName);
+		write_byte(floatround(fColor[0], floatround_round));
+		write_byte(floatround(fColor[1], floatround_round));
+		write_byte(floatround(fColor[2], floatround_round));
+		message_end();
+		
+		xs_vec_set(gfHeadBangHudIconColor[id], fColor[0], fColor[1], fColor[2]);
+	}
+}
+
+/**
+ * Hide the hud headbanger icon for the given player and spectators of that player.
+ */
+hideHeadBangHudIcon(const id) {
+	if (!xs_vec_equal(gfHeadBangHudIconColor[id], Float:{ 0.0, 0.0, 0.0 })) {
+		message_begin(MSG_ONE, gMsgStatusIcon, { 0, 0, 0 }, id);
+		write_byte(0);
+		write_string(gszStatusIconSpriteName);
+		write_byte(0);
+		write_byte(0);
+		write_byte(0);
+		message_end();
+		
+		xs_vec_set(gfHeadBangHudIconColor[id], 0.0, 0.0, 0.0);
 	}
 }
 
@@ -579,63 +613,6 @@ hideJumpEdge(const id) {
 	if (gJumpEdgeEnt[id] != 0) {
 		remove_entity(gJumpEdgeEnt[id]);
 		gJumpEdgeEnt[id] = 0;
-	}
-}
-
-/**
- * Show the headbang aid for the given player.
- */
-showHeadBang(const id, const Float:vOrigin[3], const Float:vViewOffset[3], const Float:fColor[3]) {
-	//create the entity used for the headbang indicator, if not already created
-	if (gHeadBangEnt[id] == 0) {
-		new ent = create_entity(gszInfoTarget);
-		entity_set_string(ent, EV_SZ_classname, gszHeadBangClassname);		//to recognise the entity
-		entity_set_model(ent, gszSmoothDotSprite);				//the -smooth- dot sprite
-		entity_set_int(ent, EV_INT_rendermode, kRenderTransAdd);		//to render with background transparency
-		entity_set_float(ent, EV_FL_renderamt, 255.0);				//start visible
-		entity_set_int(ent, OWNER_INT, id);					//to know who it belongs to
-		entity_set_float(ent, EV_FL_scale, 0.25);				//quarter size
-		gHeadBangEnt[id] = ent;
-	}
-	
-	//get player data that we need
-	static Float:vViewAngles[3];
-	static Float:vForward[3];
-	static Float:vUp[3];
-	entity_get_vector(id, EV_VEC_v_angle, vViewAngles);
-	angle_vector(vViewAngles, ANGLEVECTOR_FORWARD, vForward);
-	angle_vector(vViewAngles, ANGLEVECTOR_UP, vUp);
-	
-	//calculate the position
-	static Float:fOffsetX;
-	static Float:fOffsetY;
-	static Float:fOffsetZ;
-	static Float:vPos[3];
-	fOffsetX = (vForward[0] * 8.0) + (vUp[0] * 6.0);
-	fOffsetY = (vForward[1] * 8.0) + (vUp[1] * 6.0);
-	fOffsetZ = (vForward[2] * 8.0) + (vUp[2] * 6.0);
-	xs_vec_set(vPos, vOrigin[0] + fOffsetX, vOrigin[1] + fOffsetY, vOrigin[2] + vViewOffset[2] + fOffsetZ);
-	
-	//calculate the angles by negating the forward vector
-	static Float:vAngles[3];
-	xs_vec_neg(vForward, vForward);
-	vector_to_angle(vForward, vAngles);
-	vAngles[2] = 45.0;
-	
-	//setup the position, orientation, color and size of the indicator
-	entity_set_vector(gHeadBangEnt[id], EV_VEC_origin, vPos);
-	entity_set_vector(gHeadBangEnt[id], EV_VEC_angles, vAngles);
-	entity_set_vector(gHeadBangEnt[id], EV_VEC_rendercolor, fColor);
-	entity_set_size(gHeadBangEnt[id], Float:{ -1.0, -1.0, -1.0 }, Float:{ 1.0, 1.0, 1.0 });
-}
-
-/**
- * Hide the headbang entity for the given player.
- */
-hideHeadBang(const id) {
-	if (gHeadBangEnt[id] != 0) {
-		remove_entity(gHeadBangEnt[id]);
-		gHeadBangEnt[id] = 0;
 	}
 }
 
