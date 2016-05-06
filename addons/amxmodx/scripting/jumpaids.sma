@@ -6,7 +6,7 @@
 #include "beams.inc"
 
 #define PLUGIN		"JumpAids"
-#define VERSION		"1.2"
+#define VERSION		"1.21"
 #define AUTHOR		"Necro"
 
 #define OWNER_INT	EV_INT_iuser4		//entity int id to hold the owner of the jumpaids
@@ -142,7 +142,7 @@ public client_spawn(id) {
 	hideHeadBangHudIcon(id);
 }
 
-public client_disconnect(id) {
+public client_disconnected(id) {
 	hideDistance(id);
 	hideJumpEdge(id);
 	gbDistanceOn[id] = false;
@@ -609,11 +609,11 @@ hideDistance(const id) {
 	if (gDistanceEnt[id] != 0) {
 		remove_entity(gDistanceEnt[id]);
 		gDistanceEnt[id] = 0;
-	}
-	
-	for (new i = 0; i < 3; ++i) {
-		remove_entity(gDistanceValueEnts[id][i]);
-		gDistanceValueEnts[id][i] = 0;
+		
+		for (new i = 0; i < 3; ++i) {
+			remove_entity(gDistanceValueEnts[id][i]);
+			gDistanceValueEnts[id][i] = 0;
+		}
 	}
 }
 
