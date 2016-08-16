@@ -611,8 +611,10 @@ hideDistance(const id) {
 		gDistanceEnt[id] = 0;
 		
 		for (new i = 0; i < 3; ++i) {
-			remove_entity(gDistanceValueEnts[id][i]);
-			gDistanceValueEnts[id][i] = 0;
+			if(gDistanceValueEnts[id][i] != 0) {
+				remove_entity(gDistanceValueEnts[id][i]);
+				gDistanceValueEnts[id][i] = 0;
+			}
 		}
 	}
 }
