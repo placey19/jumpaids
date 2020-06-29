@@ -1,6 +1,0 @@
-syntax: glob
-
-*.lnk
-*.zip
-*.amxx
-update.bat
