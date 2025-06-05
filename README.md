@@ -1,5 +1,5 @@
 # Jump Aids
-Jump helper plugin for Counter-Strike 1.6. Built for [AMX Modx X](www.amxmodx.org) using the Pawn programming language.
+Jump helper plugin for Counter-Strike 1.6. Built for [AMX Mod X](https://www.amxmodx.org) using the Pawn programming language.
 
 Provides visual indicators to aid in Kreedz jumping maps.
 
